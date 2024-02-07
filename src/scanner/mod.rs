@@ -49,6 +49,12 @@ impl Iterator for Scanner {
         let next_token = next.as_mut().unwrap();
 
         match peek {
+            '(' => {
+                next_token.name = LeftParen;
+            }
+            ')' => {
+                next_token.name = RightParen;
+            }
             '|' => {
                 next_token.name = Pipe;
             }
