@@ -1,3 +1,6 @@
+#[allow(dead_code)]
+#[allow(clippy::let_and_return)]
+#[derive(Debug)]
 pub enum TokenName {
     EmptyString,
     Character { value: char },
@@ -18,7 +21,8 @@ pub enum TokenName {
     EscapedDot,        // \.
 }
 
+#[derive(Debug)]
 pub struct Token {
-    name: TokenName,
-    position: usize,
+    pub name: TokenName,
+    pub position: usize,
 }
