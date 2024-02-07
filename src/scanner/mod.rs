@@ -49,6 +49,21 @@ impl Iterator for Scanner {
         let next_token = next.as_mut().unwrap();
 
         match peek {
+            '|' => {
+                next_token.name = Pipe;
+            }
+            '?' => {
+                next_token.name = Mark;
+            }
+            '*' => {
+                next_token.name = Star;
+            }
+            '+' => {
+                next_token.name = Plus;
+            }
+            '.' => {
+                next_token.name = Dot;
+            }
             '\\' => {
                 let next_char = self.next_char();
                 let mut found_escaped_char = true;
