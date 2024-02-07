@@ -3,10 +3,17 @@ pub mod tokens;
 
 use tokens::{Token, TokenName::*};
 
+// which can of balanced characters "(){}[]"
+// currently scanned character are between
+pub enum Grouping {
+    Group, // ( and )
+    // more comin' . . .
+}
 pub struct Scanner {
     source: Vec<char>,
     current: usize,
     found_empty_string: bool,
+    groupings: Vec<Grouping>
 }
 
 impl Scanner {
@@ -14,10 +21,12 @@ impl Scanner {
         let source = source.chars().collect::<Vec<_>>();
         let current = 0;
         let found_empty_string = false;
+        let groupings = vec![];
         Scanner {
             source,
             current,
             found_empty_string,
+            groupings
         }
     }
 
@@ -116,9 +125,29 @@ impl Iterator for Scanner {
 
         match peek {
             '(' => {
+                self.groupings.push(Grouping::Group);
                 next_token.name = LeftParen;
             }
             ')' => {
+                if self.groupings.is_empty() {
+                    // Error: Un-balanced )
+                    let mut error_indicator = String::new();
+                    while error_indicator.len() < self.current {
+                        error_indicator.push(' ');
+                    }
+                    error_indicator.push('^');
+                    
+                    let mut source = String::new();
+                    source.extend(self.source.iter().map(|ch| *ch));
+
+                    let error_position = self.current;
+                    eprint!("\
+                        Error in position {error_position}: Un-balanced )\n\
+                        {source}\n{error_indicator}
+                    ");
+                    panic!();
+                }
+                self.groupings.pop();
                 next_token.name = RightParen;
             }
             '|' => {
