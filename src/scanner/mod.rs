@@ -3,17 +3,23 @@ pub mod tokens;
 
 use tokens::{Token, TokenName::*};
 
-// which can of balanced characters "(){}[]"
+// which kind of balanced characters "(){}[]"
 // currently scanned character are between
-pub enum Grouping {
-    Group, // ( and )
+pub enum GroupingTag {
+    GroupParentheses, // ( and )
     // more comin' . . .
 }
+
+pub struct GroupingMark {
+    tag: GroupingTag,
+    position: usize
+}
+
 pub struct Scanner {
     source: Vec<char>,
     current: usize,
     found_empty_string: bool,
-    groupings: Vec<Grouping>
+    groupings: Vec<GroupingMark>
 }
 
 impl Scanner {
@@ -125,7 +131,7 @@ impl Iterator for Scanner {
 
         match peek {
             '(' => {
-                self.groupings.push(Grouping::Group);
+                self.groupings.push(GroupingMark {tag: GroupingTag::GroupParentheses, position: self.current});
                 next_token.name = LeftParen;
             }
             ')' => {
