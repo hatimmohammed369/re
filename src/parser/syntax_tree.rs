@@ -8,6 +8,9 @@ use std::rc::{Rc, Weak};
 pub enum ExpressionTag {
     // Empty string expression
     EmptyExpression,
+    // A grouped expression (...)
+    // where `...` is another regular expression
+    Group,
 }
 
 // (Wrapper) Expression objects after parsing
@@ -16,7 +19,7 @@ pub struct Regexp {
     // -- Which expression this wrapper contains
     pub tag: ExpressionTag,
 
-    // -- Parent expression of `tag`
+    // -- Parent expression of this object
     // * We use a Weak reference to avoid reference cycles
     // because parent points to child and child points to parent
     // thus reference count of either would never be zero
@@ -26,7 +29,7 @@ pub struct Regexp {
     // `parent` needed to modify is data
     pub parent: Option<Weak<RefCell<Regexp>>>,
 
-    // -- Children expressions of `tag`
+    // -- Children expressions of this object
     // * We use RefCell to allow interior mutability
     // in case we needed to modify Vec `children`
     // or a particular child needs to be modified
@@ -37,16 +40,17 @@ pub struct Regexp {
     pub children: RefCell<Vec<Rc<RefCell<Regexp>>>>,
 }
 
-// while initializing `Regexp` objects
-// we need some intricate initializations
-// in which we need a `default Regexp` object
-impl Default for Regexp {
-    fn default() -> Self {
+// Replace `Default` trait with a constructor which at least initializes
+// the object tag field rather than using `ExpressionTag::EmptyExpression`
+// as a default tag, and still gives an `initialized` object
+impl Regexp {
+    pub fn new(tag: ExpressionTag) -> Self {
+        let parent = None;
+        let children = RefCell::new(vec![]);
         Regexp {
-            // Assume this exprssion represents the empty regular expression
-            tag: ExpressionTag::EmptyExpression,
-            parent: None,
-            children: RefCell::new(vec![]),
+            tag,
+            parent,
+            children,
         }
     }
 }

@@ -2,7 +2,7 @@
 #[allow(dead_code)]
 #[allow(clippy::let_and_return)]
 // enable pretty-printing if needed
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum TokenName {
     // Token types
 
