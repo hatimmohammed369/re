@@ -1,7 +1,6 @@
 // disable some annoying warnings
 #[allow(dead_code)]
 #[allow(clippy::let_and_return)]
-
 // enable pretty-printing if needed
 #[derive(Debug)]
 pub enum TokenName {

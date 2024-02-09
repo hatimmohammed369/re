@@ -3,8 +3,8 @@
 // Syntax tree structs
 pub mod syntax_tree;
 
+use crate::scanner::{tokens::*, Scanner};
 use std::cell::RefCell;
-use crate::scanner::{Scanner, tokens::*};
 use syntax_tree::*;
 
 pub struct Parser {
@@ -26,9 +26,17 @@ impl Parser {
         self.current = self.scanner.next();
     }
 
+    // Attempt to parse source string
     fn parse(&mut self) -> Regexp {
-        // Parse an EmptyExpression
-        self.advance(); // grab the first token in stream
+        // grab the first token in stream
+        self.advance();
+        self.expression()
+    }
+
+    // Regexp => EmptyString | Union
+    fn expression(&mut self) -> Regexp {
+        // Attempt to parse an empty expression
+        // or a union expression as denoted by grammar rule above
         match &self.current {
             Some(peek) => {
                 // There are tokens to be processed.
@@ -37,7 +45,11 @@ impl Parser {
                         let tag = ExpressionTag::EmptyExpression;
                         let parent = None;
                         let children = RefCell::new(vec![]);
-                        Regexp { tag, parent, children }
+                        Regexp {
+                            tag,
+                            parent,
+                            children,
+                        }
                     }
                     _ => {
                         // a placeholder code

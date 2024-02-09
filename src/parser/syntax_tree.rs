@@ -46,7 +46,7 @@ impl Default for Regexp {
             // Assume this exprssion represents the empty regular expression
             tag: ExpressionTag::EmptyExpression,
             parent: None,
-            children: RefCell::new(vec![])
+            children: RefCell::new(vec![]),
         }
     }
 }
