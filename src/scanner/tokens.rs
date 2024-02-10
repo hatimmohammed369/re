@@ -8,7 +8,7 @@ pub enum TokenName {
 
     // *SPECIAL
     // indicator of places like:
-    // "|..." "...|" "...()..." "...(|)..." ""
+    // "|..." "...|" "...()..." "...(|)..." "" (an empty string)
     EmptyString,
     // a non-metacharacter and not an escaped metacharacter
     Character { value: char },
@@ -16,11 +16,11 @@ pub enum TokenName {
     // *METACHARACTERS
     LeftParen,  // (
     RightParen, // )
-    Pipe,       // |
-    Mark,       // ?
-    Star,       // *
-    Plus,       // +
-    Dot,        // .
+    Pipe,       // |, alternation operator (E1|E2|...|E_n)
+    Mark,       // ?, match zero or one occurrence of previous expression
+    Star,       // *, match zero or more occurrences of previous expression
+    Plus,       // +, match zero or more occurrences of previous expression
+    Dot,        // ., match any single character even newline `\n`
 
     // *ESCAPED METACHARACTER
     // used to match a literal metacharacter
