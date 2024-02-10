@@ -1,0 +1,9 @@
+# Lines starting with # are comments
+
+# Grammar rules currently implemented in code
+
+Regexp => EmptyString | Alternation
+
+Alternation => Group ( "|" Alternation)
+
+Group => "(" Regexp ")"
