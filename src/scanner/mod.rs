@@ -3,21 +3,6 @@ pub mod tokens;
 
 use tokens::{Token, TokenName::*};
 
-// what kind of balanced characters "(){}[]"
-// currently scanned character are between
-pub enum GroupingTag {
-    // ( and )
-    GroupParentheses,
-    // more comin' . . .
-}
-
-pub struct GroupingMark {
-    // what kind of balanced characters this mark refers to
-    tag: GroupingTag,
-    // index of left-hand balanced character "( or { or ["
-    position: usize,
-}
-
 pub struct Scanner {
     // source string characters vector to allow fast access
     source: Vec<char>,
@@ -29,11 +14,6 @@ pub struct Scanner {
     // when it's true it means we already generated EmtpyString token or we could not do so
     // rather we should attempt to generate another token (if any remaining)
     found_empty_string: bool,
-    // Type and start position of each grouping construct
-    // which are: groups (...) | character classes [...] | length modifiers {m, n}
-    // we use Vec because group expression can nest
-    // even though {} and [] do not
-    groupings: Vec<GroupingMark>,
 }
 
 // an Iterator transforming source string into a tokens stream
@@ -48,14 +28,10 @@ impl Scanner {
         // because the empty string can occur anywhere with an abitrary string
         // even within the empty string (which is itself)
         let found_empty_string = false;
-        // grouping constructs marks stack
-        // we need a stack because grouped expressions `(...)` can nest
-        let groupings = vec![];
         Scanner {
             source,
             current,
             found_empty_string,
-            groupings,
         }
     }
 
@@ -185,35 +161,6 @@ impl Iterator for Scanner {
         if !self.has_next() {
             // We reached end of input and we can not generate
             // another token, not even EmptyString
-
-            // But we need to check for un-balanced ( before quitting
-            if !self.groupings.is_empty() {
-                // Place a caret `^` below each un-balanced (
-                // we can retrieve from field (self.groupings)
-
-                // String containing a caret aligned with each un-balanced (
-                // pre-allocate at least `self.source.len()` bytes
-                // to make appending characters faster
-                let mut error_indicator = String::with_capacity(self.source.len());
-                for mark in &self.groupings {
-                    while error_indicator.len() < mark.position {
-                        // add spaces fill for alignment
-                        error_indicator.push(' ');
-                    }
-                    // add error indicator `^`
-                    error_indicator.push('^');
-                }
-                // re-construct source string
-                let source = self.get_source_string();
-                eprintln!(
-                    "Error: Un-balanced characters\n\
-                    {source}\n{error_indicator}"
-                );
-                // we could called std::process::exit, but panicing allows
-                // to find code generating the error through backtrace provide by panic!
-                panic!();
-            }
-
             // All characters are consumed and we can not generate an EmptyString token
             // this iterator has no more elements, return None
             return None;
@@ -232,41 +179,9 @@ impl Iterator for Scanner {
 
         match peek {
             '(' => {
-                // Mark this position as the beginning of a group expression `(...)`
-                self.groupings.push(GroupingMark {
-                    tag: GroupingTag::GroupParentheses,
-                    position: self.current,
-                });
                 next_token.name = LeftParen;
             }
             ')' => {
-                if self.groupings.is_empty() {
-                    // Error: Un-balanced )
-
-                    // a string of spaces ending with a `^`
-                    // aligned with source string to indicate the un-balanced )
-                    // pre-allocate at least `self.source.len()` bytes
-                    // to make appending characters faster
-                    let mut error_indicator = String::with_capacity(self.source.len());
-                    while error_indicator.len() < self.current {
-                        // add spaces fill for alignment
-                        error_indicator.push(' ');
-                    }
-                    // add `^` to indicat the un-balanced )
-                    error_indicator.push('^');
-                    // re-construct source string
-                    let source = self.get_source_string();
-                    let error_position = self.current;
-                    eprintln!(
-                        "Error in position {error_position}: Un-balanced )\n\
-                        {source}\n{error_indicator}"
-                    );
-                    // panic! to use backtrace if needed
-                    panic!();
-                }
-                // Remove most recently appended marker to indicate
-                // end of most recently scanned group
-                self.groupings.pop();
                 next_token.name = RightParen;
             }
             '|' => {
