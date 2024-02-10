@@ -3,6 +3,7 @@
 // Syntax tree structs
 pub mod syntax_tree;
 
+use crate::format_error;
 use crate::scanner::{tokens::*, Scanner};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -146,16 +147,25 @@ impl Parser {
             None => {
                 // Syntax error: Expected expression after (
                 let error = "Expected expression after (";
-                let error_position = self.current.as_ref().unwrap().position;
-                let mut error_indicator = String::with_capacity(error_position);
-                while error_indicator.len() < error_position {
-                    error_indicator.push(' ');
-                }
-                error_indicator.push('^');
                 let source = self.scanner.get_source_string();
-                Err(format!(
-                    "Syntax error in position {error_position}: {error}\n\
-                    {source}\n{error_indicator}"
+                let error_position = {
+                    match &self.current {
+                        Some(Token { position, .. }) => *position,
+                        None => source.len(), // in case parser reached end of input
+                    }
+                };
+                Err(format_error(
+                    &format!("Syntax error {}: {error}", {
+                        match &self.current {
+                            Some(Token { position, .. }) => format!("in position {position}"),
+                            None => String::from("at end of input"), // in case parser reached end of input
+                        }
+                    }),
+                    &source,
+                    // Place one (1_u8) caret `^` below error position
+                    // in source string as a visual aid
+                    &[(error_position, 1_u8)],
+                    "", // Hints
                 ))
             }
         }
@@ -179,16 +189,29 @@ impl Parser {
     // if false report `error`
     fn consume(&mut self, expected: TokenName, error: &str) -> Result<(), String> {
         if !self.check(expected) {
-            let error_position = self.current.as_ref().unwrap().position;
-            let mut error_indicator = String::with_capacity(error_position);
-            while error_indicator.len() < error_position {
-                error_indicator.push(' ');
-            }
-            error_indicator.push('^');
+            // current token name (type) is not what was expected
+            // in other words, grammar requires a specific item to appear here
+            // but parser found something else
+            // this is a syntax error
             let source = self.scanner.get_source_string();
-            return Err(format!(
-                "Syntax error in position {error_position}: {error}\n\
-                {source}\n{error_indicator}"
+            let error_position = {
+                match &self.current {
+                    Some(Token { position, .. }) => *position,
+                    None => source.len(), // in case parser reached end of input
+                }
+            };
+            return Err(format_error(
+                &format!("Syntax error {}: {error}", {
+                    match &self.current {
+                        Some(Token { position, .. }) => format!("in position {position}"),
+                        None => String::from("at end of input"), // in case parser reached end of input
+                    }
+                }),
+                &self.scanner.get_source_string(),
+                // Place one (1_u8) caret `^` below error position
+                // in source string as a visual aid
+                &[(error_position, 1_u8)],
+                "", // Hints
             ));
         }
         self.advance();
