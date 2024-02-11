@@ -14,6 +14,11 @@ pub struct Parser {
     scanner: Scanner,
     // currently (`processed` or `to be processed`) token
     current: Option<Token>,
+    // -------------------- NOTE --------------------
+    // AFTER PARSING AN ARBITRARY EXPRESSION, FIELD `current` MUST
+    // POINT TO THE VERY FIRST CHARACTER (IF ANY, OR EmptyString token)
+    // AFTER THE MOST RECENTLY PARSED EXPRESSION
+    // ----------------------------------------------
 }
 
 impl Parser {
@@ -77,56 +82,68 @@ impl Parser {
         }
     }
 
-    // AFTER PARSING AN ARBITRARY EXPRESSION, FIELD `current` MUST
-    // POINT TO THE VERY FIRST CHARACTER (IF ANY, OR EmptyString token)
-    // AFTER THE MOST RECENTLY PARSED EXPRESSION
-    // This rule will be `coded` soon
-    // Regexp => EmptyString | Union
+    // Regexp => Primary
     fn parse_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
-        // Attempt to parse an empty expression
-        // or `a union expression as denoted by grammar rule above` -- coming soon
-        match &self.current {
-            Some(peek) => {
-                // There are tokens to be processed.
-                match peek.name {
-                    TokenName::EmptyString => {
-                        // Move past EmptyString token
-                        self.advance();
-                        // field `current` now points to the first character after
-                        // the position of EmptyString we had before the above call
-                        // to `advance`. Note that it can not point to another
-                        // EmptyString token because the scanner never generates
-                        // two or more EmptyString tokens in row
+        // Attempt to parse an arbibrary expression
+        if self.current.is_some() {
+            // There are tokens to be processed.
+            self.parse_primary()
+        } else {
+            // end of stream, no more tokens to process
+            Ok(None) // No expression was parsed
+        }
+    }
 
-                        // Successfully parsed an empty expression
-                        Ok(Some(Rc::new(RefCell::new(Regexp::new(
-                            ExpressionTag::EmptyExpression,
-                        )))))
-                    }
-                    // Attempt to parse a group expression
-                    TokenName::LeftParen => self.parse_group(),
-                    // Placeholder code
-                    _ => Ok(None),
-                }
-            }
-            _ => {
-                // end of stream, no more tokens to process
-                Ok(None) // no expression was parsed
+    // Primary => EMPTY_STRING | Group
+    fn parse_primary(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+        // WHAT DO YOU DO `parse_primary`?
+        // I parse primary expressions, which are:
+        // - The empty regular expression
+        // - Grouped regular expressions, like (abc)
+
+        // Note that `parse_primary` is called only when `parse_expression`
+        // confirmed that we have tokens to process
+        // in other words, parser field `current` is not Option::None
+        // thus expression `self.current.unwrap()` can NEVER panic!
+
+        match &self.current.as_ref().unwrap().name {
+            TokenName::EmptyString => self.parse_the_empty_expression(),
+            TokenName::LeftParen => self.parse_group(),
+            other => {
+                // Placeholder code
+                eprintln!("Parser is incomplete!");
+                eprintln!(
+                    "Can not parse an expression beginning\
+                    with a `TokenName::{other:#?}` token"
+                );
+                panic!();
             }
         }
     }
 
+    // Group => "(" Regexp ")"
     fn parse_group(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+        // Attempt to:
+        // First : parse an abitrary expression
+        // Second: After `First` is finished, search for a )
+        // If either `First` or `Second` fails, report an error as follow:
+        // `First` failed : report error `Expected expression after (`
+        // `Second` failed: report error `Expected ) after expression`
+        // These rules are due to grammar rule: Group => "(" Regexp ")"
+        // First : After `(` parser expects a `Regexp`
+        // Second: After `Regexp` parser expects a `)`
+
         // Move past opening (
         self.advance();
+
         // parse an arbitrary expression or report error (? operator)
         match self.parse_expression()? {
             Some(parsed_expression) => {
                 // `parsed_expression` has type Rc<RefCell<Regexp>>
 
                 // Advance only when current item has name TokenName::RightParent
-                // or report error `Expected )` (? operator)
-                self.consume(TokenName::RightParen, "Expected )")?;
+                // or report error `Expected ) after expression` (? operator)
+                self.consume(TokenName::RightParen, "Expected ) after expression")?;
                 // field `current` now points to the fisrt character (or EmptyString token)
                 // after the closing )
 
@@ -146,6 +163,14 @@ impl Parser {
             }
             None => {
                 // Syntax error: Expected expression after (
+                // But why? parser call `parse_group` only when
+                // its field `current` has type (field `name` in struct Token) is
+                // `TokenName::LeftParen`
+                // In other words, what the parser currently process is a (
+                // it makes sense to attempt to parse a grouped expression
+                // because that's what the grammar rule `Group => "(" Regexp ")"` says
+                // So when the parser follows what the grammar says and fails
+                // it's a syntax error you made
                 let error = "Expected expression after (";
                 let source = self.scanner.get_source_string();
                 let error_position = {
@@ -169,6 +194,21 @@ impl Parser {
                 ))
             }
         }
+    }
+
+    fn parse_the_empty_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+        // Move past EmptyString token
+        self.advance();
+        // field `current` now points to the first character after
+        // the position of EmptyString we had before the above call
+        // to `advance`. Note that it can not point to another
+        // EmptyString token because the scanner never generates
+        // two or more EmptyString tokens in row
+
+        // Successfully parsed an empty expression
+        Ok(Some(Rc::new(RefCell::new(Regexp::new(
+            ExpressionTag::EmptyExpression,
+        )))))
     }
 
     // Read next token in stream
