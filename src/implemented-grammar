@@ -1,9 +1,10 @@
 # Lines starting with # are comments
 
 # Grammar rules currently implemented in code
+# for more info read file `grammar`
 
-Regexp => EmptyString | Alternation
+Regexp => Primary
 
-Alternation => Group ( "|" Alternation)
+Primary => EMPTY_STRING | Group
 
 Group => "(" Regexp ")"
