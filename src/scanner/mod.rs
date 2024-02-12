@@ -1,3 +1,6 @@
+// Scanner module
+// Split the pattern string into `Tokens` for the parser
+
 #[allow(dead_code)]
 pub mod tokens;
 

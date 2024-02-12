@@ -1,4 +1,4 @@
-// Syntax tree structs
+// Syntax tree structs (Tokens structures)
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};

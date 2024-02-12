@@ -4,7 +4,9 @@
 // enable pretty-printing if needed
 #[derive(Debug, PartialEq)]
 pub enum TokenName {
-    // Token types
+    // Token types (names)
+    // When we say `an EmptyString token` we mean a Token object
+    // whose `name` field is set to `TokenName::EmptyString`
 
     // *SPECIAL
     // indicator of places like:
@@ -34,9 +36,17 @@ pub enum TokenName {
     EscapedDot,        // \.
 }
 
+// Scanner generates `Tokens` which are a atoms of regular expressions
+// Token is identified by two properties:
+// name    : a variant of TokenName
+// position: usize integer indicating where this Token begins inside source string given to the
+// scanner
+// The scanner just splits the pattern string for the parser
+
 // enable pretty-printing if needed
 #[derive(Debug)]
 pub struct Token {
+    // What kind this token is?
     pub name: TokenName,
     // index in source string
     pub position: usize,
