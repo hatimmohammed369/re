@@ -100,6 +100,7 @@ impl Parser {
         // WHAT DO YOU DO `parse_primary`?
         // I parse primary expressions, which are:
         // - The empty regular expression
+        // - The dot expression `.`
         // - Grouped regular expressions, like (abc)
 
         // Note that `parse_primary` is called only when `parse_expression`
@@ -109,6 +110,7 @@ impl Parser {
 
         match &self.current.as_ref().unwrap().name {
             TokenName::EmptyString => self.parse_the_empty_expression(),
+            TokenName::Dot => self.parse_the_dot_expression(),
             TokenName::LeftParen => self.parse_group(),
             other => {
                 // Placeholder code
@@ -209,6 +211,16 @@ impl Parser {
         // Successfully parsed an empty expression
         Ok(Some(Rc::new(RefCell::new(Regexp::new(
             ExpressionTag::EmptyExpression,
+        )))))
+    }
+
+    fn parse_the_dot_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+        // Move past Dot token
+        self.advance();
+
+        // Successfully parsed a dot expression
+        Ok(Some(Rc::new(RefCell::new(Regexp::new(
+            ExpressionTag::DotExpression,
         )))))
     }
 

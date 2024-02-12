@@ -5,6 +5,8 @@
 
 Regexp => Primary
 
-Primary => EMPTY_STRING | Group
+Primary => EMPTY_STRING | MatchAnyCharacter | Group
+
+MatchAnyCharacter => "."
 
 Group => "(" Regexp ")"

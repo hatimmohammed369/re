@@ -8,6 +8,10 @@ use std::rc::{Rc, Weak};
 pub enum ExpressionTag {
     // Empty string expression
     EmptyExpression,
+
+    // Dot expression `.`
+    DotExpression,
+
     // A grouped expression (...)
     // where `...` is another regular expression
     Group,
