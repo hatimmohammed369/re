@@ -2,7 +2,7 @@
 #[allow(dead_code)]
 #[allow(clippy::let_and_return)]
 // enable pretty-printing if needed
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum TokenName {
     // Token types (names)
     // When we say `an Empty token` we mean a Token object
@@ -13,7 +13,12 @@ pub enum TokenName {
     // "|..." "...|" "...()..." "...(|)..." "" (an empty string)
     Empty,
     // a non-metacharacter and not an escaped metacharacter
-    Character { value: char },
+    Character {
+        value: char,
+        // True when Token object wrapping this `TokenName::Character`
+        // points to an escaped metacharacter (like \+) in the source string
+        is_escaped_metacharacter: bool,
+    },
 
     // *METACHARACTERS
     LeftParen,  // (
@@ -23,17 +28,6 @@ pub enum TokenName {
     Star,       // *, match zero or more occurrences of previous expression
     Plus,       // +, match zero or more occurrences of previous expression
     Dot,        // ., match any single character even newline `\n`
-
-    // *ESCAPED METACHARACTER
-    // used to match a literal metacharacter
-    EscapedSlash,      // \\
-    EscapedLeftParen,  // \(
-    EscapedRightParen, // \)
-    EscapedPipe,       // \|
-    EscapedMark,       // \?
-    EscapedStar,       // \*
-    EscapedPlus,       // \+
-    EscapedDot,        // \.
 }
 
 // Scanner generates `Tokens` which are a atoms of regular expressions

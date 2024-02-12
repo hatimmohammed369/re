@@ -71,7 +71,9 @@ impl Scanner {
 
     // advance the current character marker one step forward
     fn advance(&mut self) {
-        self.current += 1;
+        if self.current < self.source.len() {
+            self.current += 1;
+        }
     }
 
     // check if we reached end of input
@@ -172,13 +174,18 @@ impl Iterator for Scanner {
         // By default assume the current character is an ordinary character
         // (not a metacharacter and not an escaped metacharacter)
         let mut next = Some(Token {
-            name: Character { value: peek },
+            name: Character {
+                value: peek,
+                // Assume token to be generated is not an escaped metacharacter
+                is_escaped_metacharacter: false,
+            },
             position: self.current,
         });
+
         // a mutable (&mut) reference to Token object inside local variable `next`
         // we use this &mut reference to modify Token::name field in case current character
         // is not an ordinary character (metacharacter or an escaped metacharacter)
-        let next_token = next.as_mut().unwrap();
+        let next_token = next.as_mut().unwrap(); //&mut Token
 
         match peek {
             '(' => {
@@ -203,50 +210,31 @@ impl Iterator for Scanner {
                 next_token.name = Dot;
             }
             '\\' => {
-                let next_char = self.next_char();
-                // if this flag is true then we must advanced one more time
-                // because we found an escpaed metacharacter which is actually
-                // two characters: slash followed by a metacharacter
-                // the call to `self.advance()` here is to move to metacharacter
-                // following current slash (stored in local field `peek`)
-                // the final call to `self.advance()` at the end of Iterator::new
-                // moves to next character after the now found metacharacter
-                let mut found_escaped_metachar = true;
-                match next_char {
-                    '\\' => {
-                        next_token.name = EscapedSlash;
-                    }
-                    '(' => {
-                        next_token.name = EscapedLeftParen;
-                    }
-                    ')' => {
-                        next_token.name = EscapedRightParen;
-                    }
-                    '|' => {
-                        next_token.name = EscapedPipe;
-                    }
-                    '?' => {
-                        next_token.name = EscapedMark;
-                    }
-                    '*' => {
-                        next_token.name = EscapedStar;
-                    }
-                    '+' => {
-                        next_token.name = EscapedPlus;
-                    }
-                    '.' => {
-                        next_token.name = EscapedDot;
-                    }
-                    _ => {
-                        found_escaped_metachar = false;
-                    }
+                if (self.current + 1) >= self.source.len() {
+                    eprintln!("Unary operator slash \\ with no operand at end");
+                    panic!();
                 }
-                if found_escaped_metachar && self.has_next() {
-                    // the additional condition `self.has_next()` ensures
-                    // than `self.current` is never increased if it's already
-                    // equal to `self.source.len()`
-                    self.advance();
-                }
+
+                if let next_char @ ('\\' | '(' | ')' | '|' | '?' | '*' | '+' | '.') = self.next_char() {
+                        // Next character is a metacharacter
+
+                        // Advanced one more time before the final advance at the end of function `next`
+                        // to consume the metacharacter following the \ in `peek`
+
+                        // Advance to consume the following (escaped by slash in `peek`) metacharacter
+                        self.advance();
+
+                        if let Character {
+                            value,
+                            is_escaped_metacharacter,
+                        } = &mut next_token.name
+                        {
+                            // Token data is the escaped metacharacter, not the slash in `peek`
+                            *value = next_char;
+                            // Yes, this `next_char` is an escaped metacharacter
+                            *is_escaped_metacharacter = true;
+                        }
+                    }
             }
             _ => {
                 // Any other ordinary character.

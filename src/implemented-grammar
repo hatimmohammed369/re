@@ -5,8 +5,34 @@
 
 Regexp => Primary
 
-Primary => EMPTY_STRING | MatchAnyCharacter | Group
+Primary => Empty | MatchAnyCharacter | Group | MatchCharacter
+
+Empty => ""
 
 MatchAnyCharacter => "."
 
 Group => "(" Regexp ")"
+
+MatchCharacter => Character
+
+Character => OrdinaryCharacter | EscapedMetacharacter
+
+OrdinaryCharacter => [^\(\)\\\|\*\.\?]
+
+EscapedMetacharacter => "\" Metacharacter
+
+Metacharacter => LeftParen | RightParen | Slash | Pipe | Star | Dot | Mark
+
+LeftParen => "("
+
+RightParen => ")"
+
+Slash => "\"
+
+Pipe => "|"
+
+Star => "*"
+
+Dot => "."
+
+Mark => "?"

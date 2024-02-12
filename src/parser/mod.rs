@@ -95,12 +95,13 @@ impl Parser {
         }
     }
 
-    // Primary => EMPTY_STRING | Group
+    // Primary => Empty | MatchAnyCharacter | Group | MatchCharacter
     fn parse_primary(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
         // WHAT DO YOU DO `parse_primary`?
         // I parse primary expressions, which are:
         // - The empty regular expression
         // - The dot expression `.`
+        // - Character expressions like `x`
         // - Grouped regular expressions, like (abc)
 
         // Note that `parse_primary` is called only when `parse_expression`
@@ -108,9 +109,10 @@ impl Parser {
         // in other words, parser field `current` is not Option::None
         // thus expression `self.current.unwrap()` can NEVER panic!
 
-        match &self.current.as_ref().unwrap().name {
-            TokenName::Empty => self.parse_the_empty_expression(),
+        match &self.current.as_ref().unwrap().name.clone() {
+            TokenName::EmptyToken => self.parse_the_empty_expression(),
             TokenName::Dot => self.parse_the_dot_expression(),
+            TokenName::Character { value, .. } => self.parse_character_expression(*value),
             TokenName::LeftParen => self.parse_group(),
             other => {
                 // Placeholder code
@@ -199,6 +201,7 @@ impl Parser {
         }
     }
 
+    // Empty => ""
     fn parse_the_empty_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
         // Move past Empty token
         self.advance();
@@ -214,6 +217,7 @@ impl Parser {
         )))))
     }
 
+    // MatchAnyCharacter => Dot
     fn parse_the_dot_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
         // Move past Dot token
         self.advance();
@@ -221,6 +225,17 @@ impl Parser {
         // Successfully parsed a dot expression
         Ok(Some(Rc::new(RefCell::new(Regexp::new(
             ExpressionTag::DotExpression,
+        )))))
+    }
+
+    // Character => OrdinaryCharacter | EscapedMetacharacter
+    fn parse_character_expression(&mut self, value: char) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+        // Move past `Character` token
+        self.advance();
+
+        // Successfully parsed a character expression
+        Ok(Some(Rc::new(RefCell::new(Regexp::new(
+            ExpressionTag::CharacterExpression { value },
         )))))
     }
 

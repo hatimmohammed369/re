@@ -12,6 +12,9 @@ pub enum ExpressionTag {
     // Dot expression `.`
     DotExpression,
 
+    // Character expression
+    CharacterExpression { value: char },
+
     // A grouped expression (...)
     // where `...` is another regular expression
     Group,
