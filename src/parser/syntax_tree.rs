@@ -7,13 +7,20 @@ use std::rc::{Rc, Weak};
 #[derive(Debug, Clone)]
 pub enum ExpressionTag {
     // Empty string expression
+    // the expression between ( and ) in string `()`
+    // or between ( and | and ) in string `(|)
+    // or around | in string `|` or string `||`
     EmptyExpression,
 
     // Dot expression `.`
     DotExpression,
 
-    // Character expression
+    // Character expression, like `z`
     CharacterExpression { value: char },
+
+    // Concatenation expression
+    // something like `a.b.c(abc)`
+    Concatenation,
 
     // A grouped expression (...)
     // where `...` is another regular expression

@@ -3,7 +3,9 @@
 # Grammar rules currently implemented in code
 # for more info read file `grammar`
 
-Regexp => Primary
+Regexp => Concatenation
+
+Concatenation => Primary+
 
 Primary => Empty | MatchAnyCharacter | Group | MatchCharacter
 

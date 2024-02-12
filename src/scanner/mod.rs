@@ -215,26 +215,28 @@ impl Iterator for Scanner {
                     panic!();
                 }
 
-                if let next_char @ ('\\' | '(' | ')' | '|' | '?' | '*' | '+' | '.') = self.next_char() {
-                        // Next character is a metacharacter
+                if let next_char @ ('\\' | '(' | ')' | '|' | '?' | '*' | '+' | '.') =
+                    self.next_char()
+                {
+                    // Next character is a metacharacter
 
-                        // Advanced one more time before the final advance at the end of function `next`
-                        // to consume the metacharacter following the \ in `peek`
+                    // Advanced one more time before the final advance at the end of function `next`
+                    // to consume the metacharacter following the \ in `peek`
 
-                        // Advance to consume the following (escaped by slash in `peek`) metacharacter
-                        self.advance();
+                    // Advance to consume the following (escaped by slash in `peek`) metacharacter
+                    self.advance();
 
-                        if let Character {
-                            value,
-                            is_escaped_metacharacter,
-                        } = &mut next_token.name
-                        {
-                            // Token data is the escaped metacharacter, not the slash in `peek`
-                            *value = next_char;
-                            // Yes, this `next_char` is an escaped metacharacter
-                            *is_escaped_metacharacter = true;
-                        }
+                    if let Character {
+                        value,
+                        is_escaped_metacharacter,
+                    } = &mut next_token.name
+                    {
+                        // Token data is the escaped metacharacter, not the slash in `peek`
+                        *value = next_char;
+                        // Yes, this `next_char` is an escaped metacharacter
+                        *is_escaped_metacharacter = true;
                     }
+                }
             }
             _ => {
                 // Any other ordinary character.

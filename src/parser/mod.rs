@@ -83,15 +83,65 @@ impl Parser {
         }
     }
 
-    // Regexp => Primary
+    // Regexp => Concatenation
     fn parse_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
         // Attempt to parse an arbibrary expression
         if self.current.is_some() {
             // There are tokens to be processed.
-            self.parse_primary()
+            self.parse_concatenation()
         } else {
             // end of stream, no more tokens to process
             Ok(None) // No expression was parsed
+        }
+    }
+
+    // Concatenation => Primary+
+    fn parse_concatenation(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+        // Attempt to parse a concatenation of regular expressions
+
+        let concatenation = Regexp::new(ExpressionTag::Concatenation);
+        while let Some(primary_expression) = self.parse_primary()? {
+            // Parsed a new expression
+            // append it to field `children` of this `alternation`
+            concatenation.children.borrow_mut().push(primary_expression);
+            if self.current.is_none() {
+                // Parser reached end of pattern
+                break;
+            }
+        }
+
+        // Can't match referenced value to `concatenation` becuase it's moved inside `match`
+        let parsed_expressions = concatenation.children.borrow().len();
+        match parsed_expressions {
+            0 => {
+                // No expression was parsed, possibly end of pattern
+                Ok(None)
+            }
+            1 => {
+                // One expression was parsed, but concatenation expressions are composed
+                // of at least two expressions, thus it makes no sense to return this single
+                // expression as a concatenation
+                // Return this expression verbatim
+                Ok(concatenation.children.borrow_mut().pop())
+            }
+            _ => {
+                // At least two expressions were parsed
+                // Composed a concatenation expression
+                // Its children are already inside it, in Regexp field `children`
+                let concatenation = Rc::new(RefCell::new(concatenation));
+                concatenation
+                    .borrow_mut()
+                    .children
+                    .borrow_mut()
+                    .iter_mut()
+                    .for_each(|child| {
+                        // Make each child obtain a weak reference of its parent `concatenation`
+                        child.borrow_mut().parent = Some(Rc::downgrade(&concatenation));
+                    });
+
+                // Successfully parsed a concatenation expression
+                Ok(Some(concatenation))
+            }
         }
     }
 
@@ -109,20 +159,17 @@ impl Parser {
         // in other words, parser field `current` is not Option::None
         // thus expression `self.current.unwrap()` can NEVER panic!
 
-        match &self.current.as_ref().unwrap().name.clone() {
-            TokenName::EmptyToken => self.parse_the_empty_expression(),
-            TokenName::Dot => self.parse_the_dot_expression(),
-            TokenName::Character { value, .. } => self.parse_character_expression(*value),
-            TokenName::LeftParen => self.parse_group(),
-            other => {
-                // Placeholder code
-                eprintln!("Parser is incomplete!");
-                eprintln!(
-                    "Can not parse an expression beginning\
-                    with a `TokenName::{other:#?}` token"
-                );
-                panic!();
+        match &self.current.as_ref() {
+            Some(token) => {
+                match &token.name {
+                    TokenName::Empty => self.parse_the_empty_expression(),
+                    TokenName::Dot => self.parse_the_dot_expression(),
+                    TokenName::Character { value, .. } => self.parse_character_expression(*value),
+                    TokenName::LeftParen => self.parse_group(),
+                    _ => Ok(None), // Can not parse a primary expression using current token
+                }
             }
+            None => Ok(None),
         }
     }
 
@@ -229,7 +276,10 @@ impl Parser {
     }
 
     // Character => OrdinaryCharacter | EscapedMetacharacter
-    fn parse_character_expression(&mut self, value: char) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+    fn parse_character_expression(
+        &mut self,
+        value: char,
+    ) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
         // Move past `Character` token
         self.advance();
 
