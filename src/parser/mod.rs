@@ -17,7 +17,7 @@ pub struct Parser {
     current: Option<Token>,
     // -------------------- NOTE --------------------
     // AFTER PARSING AN ARBITRARY EXPRESSION, FIELD `current` MUST
-    // POINT TO THE VERY FIRST CHARACTER (IF ANY, OR EmptyString token)
+    // POINT TO THE VERY FIRST CHARACTER (IF ANY, OR Empty token)
     // AFTER THE MOST RECENTLY PARSED EXPRESSION
     // ----------------------------------------------
 }
@@ -70,7 +70,7 @@ impl Parser {
                         // Could not parse source string for some unknown reason
                         // maybe a bug in code
                         // Because even an empty source string has at least one
-                        // token, namely EmptyString, thus we can parse a Regexp
+                        // token, namely Empty, thus we can parse a Regexp
                         // with its `tag` field set to ExpressionTag::EmptyExpression
                         let source = self.scanner.get_source_string();
                         eprintln!("Could not parse source string `{source}`");
@@ -109,7 +109,7 @@ impl Parser {
         // thus expression `self.current.unwrap()` can NEVER panic!
 
         match &self.current.as_ref().unwrap().name {
-            TokenName::EmptyString => self.parse_the_empty_expression(),
+            TokenName::Empty => self.parse_the_empty_expression(),
             TokenName::Dot => self.parse_the_dot_expression(),
             TokenName::LeftParen => self.parse_group(),
             other => {
@@ -147,7 +147,7 @@ impl Parser {
                 // Advance only when current item has name TokenName::RightParent
                 // or report error `Expected ) after expression` (? operator)
                 self.consume(TokenName::RightParen, "Expected ) after expression")?;
-                // field `current` now points to the fisrt character (or EmptyString token)
+                // field `current` now points to the fisrt character (or Empty token)
                 // after the closing )
 
                 // Construct parsed grouped expression
@@ -200,13 +200,13 @@ impl Parser {
     }
 
     fn parse_the_empty_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
-        // Move past EmptyString token
+        // Move past Empty token
         self.advance();
         // field `current` now points to the first character after
-        // the position of EmptyString we had before the above call
+        // the position of Empty we had before the above call
         // to `advance`. Note that it can not point to another
-        // EmptyString token because the scanner never generates
-        // two or more EmptyString tokens in row
+        // Empty token because the scanner never generates
+        // two or more Empty tokens in row
 
         // Successfully parsed an empty expression
         Ok(Some(Rc::new(RefCell::new(Regexp::new(

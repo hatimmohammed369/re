@@ -13,7 +13,7 @@ pub struct Scanner {
     current: usize,
     // `found_empty_string` flag indicates whether we found the empty string token
     // in current position
-    // when it's false it means we can attempt to generate EmptyString token
+    // when it's false it means we can attempt to generate Empty token
     // when it's true it means we already generated EmtpyString token or we could not do so
     // rather we should attempt to generate another token (if any remaining)
     found_empty_string: bool,
@@ -102,22 +102,22 @@ impl Iterator for Scanner {
     type Item = Token;
 
     // (Attempt to) generate a token for the current character
-    // or an EmptyString token
+    // or an Empty token
     fn next(&mut self) -> Option<Token> {
-        // First, try to generate an EmptyString token because
+        // First, try to generate an Empty token because
         // the empty string can appear anywhere within a string
         // even within the empty string (which is itself)
         let peek = self.peek();
 
         let prev = self.previous();
         // if certain characters "( | )" are adjacent with the former not escaped
-        // we can generate an EmptyString token
+        // we can generate an Empty token
         // self.source[self.current - 2] (if exists) is second to current character
         // it's where to look to check whether previous character is preceeded by a slash
         // which means it's escaped
         let is_prev_escaped = self.get(self.current, -2) == '\\';
         if !is_prev_escaped && !self.found_empty_string {
-            // Set flag (self.found_empty_string) to not attempt to generate EmptyString token
+            // Set flag (self.found_empty_string) to not attempt to generate Empty token
             // if previous iteration did
             self.found_empty_string = true;
             // There are 3 cases in which there is an
@@ -130,32 +130,32 @@ impl Iterator for Scanner {
                 || ((prev == '|' && (peek == ')' || peek == '|')) || (peek == '|' && self.current+1 == self.source.len()))
             {
                 // Note that we do not call advance()
-                // because EmptyString contains no characters at all
+                // because Empty contains no characters at all
                 // and hence we never actually moved
                 // instead we set flag (found_empty_string) so
                 // next time call `next` we do not visit this branch again
                 return Some(Token {
-                    name: EmptyString,
+                    name: Empty,
                     position: self.current,
                 });
             }
-            // we did not generate an EmptyString token at current position
+            // we did not generate an Empty token at current position
             // but none of the three above cases occurred
             // we try to generate another token (if any remaining)
         }
 
-        // Try to generate EmptyString token when calling `next` again
+        // Try to generate Empty token when calling `next` again
         self.found_empty_string = false;
         // note that even if flag (found_empty_string) was unset before calling Iterator::next
         // if execution reached to region of code then the return value of this call to
         // Iterator::next must return an Option::Some and then advancing
         // or Option::None which means we reached end of input
-        // in both cases Scanner will NOT attempt to generate an EmptyString token
+        // in both cases Scanner will NOT attempt to generate an Empty token
         // twice at the same position, we can't get stuck in a loop
 
         // When scanner is given an empty string as input
-        // it generates an EmptyString token but self.current is still 0
-        // when calling `next` again, it can NOT generate another EmptyString token
+        // it generates an Empty token but self.current is still 0
+        // when calling `next` again, it can NOT generate another Empty token
         // because flag `found_empty_string` is set by then
         // hence it reaches this region of code
         // the call `self.has_next()` performs the comparison
@@ -163,8 +163,8 @@ impl Iterator for Scanner {
         // clearly false and then `return None` executes signaling the end of iterator
         if !self.has_next() {
             // We reached end of input and we can not generate
-            // another token, not even EmptyString
-            // All characters are consumed and we can not generate an EmptyString token
+            // another token, not even Empty
+            // All characters are consumed and we can not generate an Empty token
             // this iterator has no more elements, return None
             return None;
         }

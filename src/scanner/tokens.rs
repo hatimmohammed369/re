@@ -5,13 +5,13 @@
 #[derive(Debug, PartialEq)]
 pub enum TokenName {
     // Token types (names)
-    // When we say `an EmptyString token` we mean a Token object
-    // whose `name` field is set to `TokenName::EmptyString`
+    // When we say `an Empty token` we mean a Token object
+    // whose `name` field is set to `TokenName::Empty`
 
     // *SPECIAL
     // indicator of places like:
     // "|..." "...|" "...()..." "...(|)..." "" (an empty string)
-    EmptyString,
+    Empty,
     // a non-metacharacter and not an escaped metacharacter
     Character { value: char },
 
