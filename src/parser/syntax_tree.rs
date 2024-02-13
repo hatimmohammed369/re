@@ -22,6 +22,10 @@ pub enum ExpressionTag {
     // something like `a.b.c(abc)`
     Concatenation,
 
+    // Alternation expression
+    // something like (a|bc|x.y.z)
+    Alternation,
+
     // A grouped expression (...)
     // where `...` is another regular expression
     Group,

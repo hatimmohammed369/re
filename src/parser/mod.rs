@@ -83,15 +83,60 @@ impl Parser {
         }
     }
 
-    // Regexp => Concatenation
+    // Regexp => Concatenation ( "|" Regexp )*
     fn parse_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
         // Attempt to parse an arbibrary expression
-        if self.current.is_some() {
-            // There are tokens to be processed.
-            self.parse_concatenation()
-        } else {
-            // end of stream, no more tokens to process
-            Ok(None) // No expression was parsed
+        // But do that attempt to parse an alternation expression
+        // because alternation has the lowest precedence of all regular expressions operations
+        let alternation = Regexp::new(ExpressionTag::Alternation);
+        while let Some(concatenation) = self.parse_concatenation()? {
+            // Parsed a new expression
+            // append it to field `children` of this `alternation`
+            alternation.children.borrow_mut().push(concatenation);
+            if !self.check(TokenName::Pipe) {
+                // Current token is not a | or
+                // perhaps parser reached end of pattern
+                // this `alternation` expression has ended
+                break;
+            } else {
+                // Consume alternation operator | (pipe)
+                // and then come back to parse more expressions
+                self.advance()?;
+            }
+        }
+
+        // Can't match referenced value to `alternation` becuase it's moved inside `match`
+        let parsed_expressions = alternation.children.borrow().len();
+        match parsed_expressions {
+            0 => {
+                // No expression was parsed, possibly end of pattern
+                Ok(None)
+            }
+            1 => {
+                // One expression was parsed, but alternation expressions are composed
+                // of at least two expressions, thus it makes no sense to return this single
+                // expression as an alternation
+                // Return this expression verbatim
+                Ok(alternation.children.borrow_mut().pop())
+            }
+            _ => {
+                // At least two expressions were parsed
+                // Composed an alternation expression
+                // Its children are already inside it, in Regexp field `children`
+                let alternation = Rc::new(RefCell::new(alternation));
+                alternation
+                    .borrow_mut()
+                    .children
+                    .borrow_mut()
+                    .iter_mut()
+                    .for_each(|child| {
+                        // Make each child obtain a weak reference of its parent `alternation`
+                        child.borrow_mut().parent = Some(Rc::downgrade(&alternation));
+                    });
+
+                // Successfully parsed an alternation expression
+                Ok(Some(alternation))
+            }
         }
     }
 
@@ -153,11 +198,6 @@ impl Parser {
         // - The dot expression `.`
         // - Character expressions like `x`
         // - Grouped regular expressions, like (abc)
-
-        // Note that `parse_primary` is called only when `parse_expression`
-        // confirmed that we have tokens to process
-        // in other words, parser field `current` is not Option::None
-        // thus expression `self.current.unwrap()` can NEVER panic!
 
         match &self.current.as_ref() {
             Some(token) => {
