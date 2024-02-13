@@ -2,18 +2,27 @@
 
 # Grammar rules currently implemented in code
 # for more info read file `grammar`
-
 Regexp => Concatenation ( "|" Regexp )*
 
 Concatenation => Primary+
 
-Primary => Empty | MatchAnyCharacter | Group | MatchCharacter
+Primary => Empty | QuantifiedExpression
 
 Empty => ""
 
-MatchAnyCharacter => "."
+QuantifiedExpression => ( Match | Group ) Quantifier?
+
+Quantifier => ZeroOrOne | ZeroOrMore | OneOrMore
+
+ZeroOrOne => "?"
+
+ZeroOrMore => "*"
+
+OneOrMore => "+"
 
 Group => "(" Regexp ")"
+
+Match => MatchCharacter | MatchAnyCharacter
 
 MatchCharacter => Character
 
@@ -38,3 +47,5 @@ Star => "*"
 Dot => "."
 
 Mark => "?"
+
+MatchAnyCharacter => Dot

@@ -256,7 +256,9 @@ impl Parser {
                 // after the closing )
 
                 // Construct parsed grouped expression
-                let group = Regexp::new(ExpressionTag::Group);
+                let group = Regexp::new(ExpressionTag::Group {
+                    quantifier: self.consume_quantifier()?,
+                });
                 // let `group` take ownershiped of the expression it encloses
                 group.children.borrow_mut().push(parsed_expression);
                 // convert `group` to appropriate return type
@@ -324,7 +326,9 @@ impl Parser {
 
         // Successfully parsed a dot expression
         Ok(Some(Rc::new(RefCell::new(Regexp::new(
-            ExpressionTag::DotExpression,
+            ExpressionTag::DotExpression {
+                quantifier: self.consume_quantifier()?,
+            },
         )))))
     }
 
@@ -338,7 +342,10 @@ impl Parser {
 
         // Successfully parsed a character expression
         Ok(Some(Rc::new(RefCell::new(Regexp::new(
-            ExpressionTag::CharacterExpression { value },
+            ExpressionTag::CharacterExpression {
+                value,
+                quantifier: self.consume_quantifier()?,
+            },
         )))))
     }
 
@@ -419,6 +426,17 @@ impl Parser {
         }
         self.advance()?;
         Ok(())
+    }
+
+    fn consume_quantifier(&mut self) -> Result<Quantifier, String> {
+        // Check current token, if its name (field `name`) is either one of:
+        // Mark, Star, Plus
+        // Consume each and construct a Quantifier variant
+        let quantifier = Quantifier::from(&self.current);
+        if !matches!(quantifier, Quantifier::None) {
+            self.advance()?;
+        }
+        Ok(quantifier)
     }
 }
 

@@ -1,7 +1,33 @@
 // Syntax tree structs (Tokens structures)
 
+use crate::scanner::tokens::*;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
+
+#[derive(Debug, Clone)]
+pub enum Quantifier {
+    None,
+    ZeroOrOne,
+    ZeroOrMore,
+    OneOrMore,
+}
+
+impl From<&Option<Token>> for Quantifier {
+    fn from(token: &Option<Token>) -> Self {
+        match token {
+            Some(tok) => {
+                // I do not want `cargo fmt` remove the outer block
+                match tok.name {
+                    TokenName::Mark => Quantifier::ZeroOrOne,
+                    TokenName::Star => Quantifier::ZeroOrMore,
+                    TokenName::Plus => Quantifier::OneOrMore,
+                    _ => Quantifier::None,
+                }
+            }
+            None => Quantifier::None,
+        }
+    }
+}
 
 // Expression type
 #[derive(Debug, Clone)]
@@ -13,10 +39,10 @@ pub enum ExpressionTag {
     EmptyExpression,
 
     // Dot expression `.`
-    DotExpression,
+    DotExpression { quantifier: Quantifier },
 
     // Character expression, like `z`
-    CharacterExpression { value: char },
+    CharacterExpression { value: char, quantifier: Quantifier },
 
     // Concatenation expression
     // something like `a.b.c(abc)`
@@ -28,7 +54,7 @@ pub enum ExpressionTag {
 
     // A grouped expression (...)
     // where `...` is another regular expression
-    Group,
+    Group { quantifier: Quantifier },
 }
 
 // (Wrapper) Expression objects after parsing
