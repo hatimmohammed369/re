@@ -265,23 +265,18 @@ impl Parser {
                 // it's a syntax error you made
                 let error = "Expected expression after (";
                 let source = self.scanner.get_source_string();
-                let error_position = {
+                let (error_index, error_position) = {
                     match &self.current {
-                        Some(Token { position, .. }) => *position,
-                        None => source.len(), // in case parser reached end of input
+                        Some(Token { position, .. }) => (*position, format!("in position {position}")),
+                        None => (source.len(), String::from("at end of pattern")), // in case parser reached end of input
                     }
                 };
                 Err(format_error(
-                    &format!("Syntax error {}: {error}", {
-                        match &self.current {
-                            Some(Token { position, .. }) => format!("in position {position}"),
-                            None => String::from("at end of input"), // in case parser reached end of input
-                        }
-                    }),
+                    &format!("Syntax error {error_position}: {error}"),
                     &source,
                     // Place one (1_u8) caret `^` below error position
                     // in source string as a visual aid
-                    &[(error_position, 1_u8)],
+                    &[(error_index, 1_u8)],
                     "", // Hints
                 ))
             }
@@ -352,23 +347,18 @@ impl Parser {
             // but parser found something else
             // this is a syntax error
             let source = self.scanner.get_source_string();
-            let error_position = {
+            let (error_index, error_position) = {
                 match &self.current {
-                    Some(Token { position, .. }) => *position,
-                    None => source.len(), // in case parser reached end of input
+                    Some(Token { position, .. }) => (*position, format!("in position {position}")),
+                    None => (source.len(), String::from("at end of pattern")), // in case parser reached end of input
                 }
             };
             return Err(format_error(
-                &format!("Syntax error {}: {error}", {
-                    match &self.current {
-                        Some(Token { position, .. }) => format!("in position {position}"),
-                        None => String::from("at end of input"), // in case parser reached end of input
-                    }
-                }),
+                &format!("Syntax error {error_position}: {error}"),
                 &self.scanner.get_source_string(),
                 // Place one (1_u8) caret `^` below error position
                 // in source string as a visual aid
-                &[(error_position, 1_u8)],
+                &[(error_index, 1_u8)],
                 "", // Hints
             ));
         }
