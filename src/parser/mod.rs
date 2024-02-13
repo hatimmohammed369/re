@@ -10,6 +10,13 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use syntax_tree::*;
 
+#[allow(dead_code)]
+// Mark where to a grouping begins
+enum GroupingMark {
+    // There is a ( in index `position` in source string
+    Group { position: usize },
+}
+
 pub struct Parser {
     // Tokens stream
     scanner: Scanner,
@@ -20,19 +27,28 @@ pub struct Parser {
     // POINT TO THE VERY FIRST CHARACTER (IF ANY, OR Empty token)
     // AFTER THE MOST RECENTLY PARSED EXPRESSION
     // ----------------------------------------------
+
+    // marks stack
+    // we need a stack because groups (...) can nest
+    grouping_marks: Vec<GroupingMark>,
 }
 
 impl Parser {
     fn new(source: &str) -> Parser {
         let scanner = Scanner::new(source);
         let current = None;
-        Parser { scanner, current }
+        let grouping_marks = vec![];
+        Parser {
+            scanner,
+            current,
+            grouping_marks,
+        }
     }
 
     // Attempt to parse source string
     fn parse_source(&mut self) -> Result<Regexp, String> {
         // Grab the first token in stream
-        self.advance();
+        self.advance()?;
         match self.parse_expression() {
             Ok(option_regexp) => {
                 // `option_regexp` has type Option<Rc<RefCell<Regexp>>>
@@ -226,7 +242,7 @@ impl Parser {
         // Second: After `Regexp` parser expects a `)`
 
         // Move past opening (
-        self.advance();
+        self.advance()?;
 
         // parse an arbitrary expression or report error (? operator)
         match self.parse_expression()? {
@@ -267,7 +283,9 @@ impl Parser {
                 let source = self.scanner.get_source_string();
                 let (error_index, error_position) = {
                     match &self.current {
-                        Some(Token { position, .. }) => (*position, format!("in position {position}")),
+                        Some(Token { position, .. }) => {
+                            (*position, format!("in position {position}"))
+                        }
                         None => (source.len(), String::from("at end of pattern")), // in case parser reached end of input
                     }
                 };
@@ -286,7 +304,7 @@ impl Parser {
     // Empty => ""
     fn parse_the_empty_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
         // Move past Empty token
-        self.advance();
+        self.advance()?;
         // field `current` now points to the first character after
         // the position of Empty we had before the above call
         // to `advance`. Note that it can not point to another
@@ -302,7 +320,7 @@ impl Parser {
     // MatchAnyCharacter => Dot
     fn parse_the_dot_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
         // Move past Dot token
-        self.advance();
+        self.advance()?;
 
         // Successfully parsed a dot expression
         Ok(Some(Rc::new(RefCell::new(Regexp::new(
@@ -316,7 +334,7 @@ impl Parser {
         value: char,
     ) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
         // Move past `Character` token
-        self.advance();
+        self.advance()?;
 
         // Successfully parsed a character expression
         Ok(Some(Rc::new(RefCell::new(Regexp::new(
@@ -325,8 +343,45 @@ impl Parser {
     }
 
     // Read next token in stream
-    fn advance(&mut self) {
+    fn advance(&mut self) -> Result<(), String> {
         self.current = self.scanner.next();
+        if self.check(TokenName::RightParen) && self.grouping_marks.pop().is_none() {
+            // There is no group expression currently processed
+            // Thus ) was used without its matching (
+            // Syntax error!
+            let error = "Un-balanced )\n) is used without a matching (";
+            let source = self.scanner.get_source_string();
+            let (error_index, error_position) = {
+                match &self.current {
+                    Some(Token { position, .. }) => (*position, format!("in position {position}")),
+                    None => (source.len(), String::from("at end of pattern")), // in case parser reached end of input
+                }
+            };
+            return Err(format_error(
+                &format!("Syntax error {error_position}: {error}"),
+                &self.scanner.get_source_string(),
+                // Place one (1_u8) caret `^` below error position
+                // in source string as a visual aid
+                &[(error_index, 1_u8)],
+                // Hints
+                "\nTo match a literal ) use \\)\n\
+                To match a metacharacter, preceed it with a slash in your pattern \\\n\
+                To match a *, for instacne, use \\* in your pattern\n\n\
+                But remember, \\\\ inside your (rust non-raw string) pattern is one slash for the regular expressions engine\n\
+                Hence to match a single literal slash, you write pattern \\\\\\\\\n\
+                The first pair (one slash, operator) escape the second pair (one slash, operand)\n\
+                Or, you can use a raw stirng `r\"\\\\\"",
+            ));
+        } else if self.check(TokenName::LeftParen) {
+            // The parser has found a possibly opening (
+            // Note the word `possibly`, if pattern ends with a matching )
+            // then the parser will report a syntax error
+            self.grouping_marks.push(GroupingMark::Group {
+                position: self.current.as_ref().unwrap().position,
+            });
+            return Ok(());
+        }
+        Ok(())
     }
 
     // Check if current token (if any) has a given type
@@ -362,7 +417,7 @@ impl Parser {
                 "", // Hints
             ));
         }
-        self.advance();
+        self.advance()?;
         Ok(())
     }
 }
