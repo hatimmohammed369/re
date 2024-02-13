@@ -122,15 +122,47 @@ impl Iterator for Scanner {
             // Set flag (self.found_empty_string) to not attempt to generate Empty token
             // if previous iteration did
             self.found_empty_string = true;
-            // There are 3 cases in which there is an
-            // empty string token between metacharacters
-            // CASE 1: An empty source string or a string starting with |
-            if (self.source.is_empty() || (self.source.len() == 1 && peek == '|'))
-                // CASE 2: ( followed by either | or )
-                || (prev == '(' && (peek == '|' || peek == ')'))
-                // CASE 3: `| followed by ) or another |` or `| is the last character in input`
-                || ((prev == '|' && (peek == ')' || peek == '|')) || (peek == '|' && self.current+1 == self.source.len()))
-            {
+
+            // When does the scanner generate an `Empty` token?
+            #[allow(unused_parens)]
+            if (
+                // CASE 1
+                // "" (empty string)
+                // source string is empty, emit `Empty` because it's the only token
+                // which can appear in an emtpy string since it contains no characters at all
+                self.source.is_empty() ||
+
+                // CASE 2
+                // "|..."
+                // source string begins with |, emit `Empty` BEFORE the leading |
+                (self.current == 0 && peek == '|') ||
+
+                // CASE 3
+                // "...|"
+                // source string ends with |, emit `Empty` AFTER the trailing |
+                (self.current == self.source.len() && prev == '|' && peek == '\0') ||
+
+                // CASE 4
+                // "...||..."
+                // emit `Empty` AFTER | and BEFORE following |
+                // in other words, emit `Empty` between two adjacent |'s
+                (prev == '|' && peek == '|') ||
+
+                // CASE 5
+                // "...(|...)..."
+                // emit `Empty` AFTER ( and BEFORE |
+                (prev == '(' && peek == '|') ||
+
+                // CASE 6
+                // "...(...|)..."
+                // emit `Empty` AFTER | and BEFORE )
+                (prev == '|' && peek == ')') ||
+
+                // CASE 7
+                // "...()..."
+                // emit `Empty` AFTER ( and BEFORE )
+                (prev == '(' && peek == ')')
+            ) {
                 // Note that we do not call advance()
                 // because Empty contains no characters at all
                 // and hence we never actually moved

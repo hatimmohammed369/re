@@ -10,7 +10,13 @@ pub enum TokenName {
 
     // *SPECIAL
     // indicator of places like:
-    // "|..." "...|" "...()..." "...(|)..." "" (an empty string)
+    // "" (an empty string)
+    // "|..." before the leading |
+    // "...|" after the trailing |
+    // "...||..." between | and |
+    // "...(|...)..." between ( and |
+    // "...(...|)..." between | and )
+    // "...()..." between ( and )
     Empty,
     // a non-metacharacter and not an escaped metacharacter
     Character {
