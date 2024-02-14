@@ -58,6 +58,10 @@ impl Matcher {
         }
     }
 
+    fn unchecked_advance(&mut self) {
+        self.current += 1;
+    }
+
     // Assign a new target to match on
     pub fn assign_match_target(&mut self, target: &str) {
         self.target = target.chars().collect();
@@ -116,66 +120,47 @@ impl Matcher {
     // Return None indicating failure
     #[allow(unused_variables)]
     fn character_expression_match(&mut self, value: char, quantifier: Quantifier) -> Option<Match> {
-        while let Some(ch) = self.target.get(self.current).copied() {
-            match quantifier {
-                Quantifier::ZeroOrOne => {
-                    // Matching expressions `x?`
-                    if ch == value {
-                        // Successfully matched character in parameter `value`
-                        let slice = String::from(value);
-                        let begin = self.current;
-                        // Make next search start further in `target`
-                        self.advance();
-                        let end = self.current;
-                        return Some(Match { slice, begin, end });
-                    } else {
-                        return self.empty_expression_match();
-                    }
-                }
-                Quantifier::ZeroOrMore => {
-                    // Matching expressions `x*`
-                    let begin = self.current;
-                    let mut slice = String::with_capacity(self.target.len() - self.current);
-                    let mut matches_count = 0usize;
-                    while self.has_next() && self.target[self.current] == value {
-                        self.current += 1;
-                        matches_count += 1;
-                        slice.push(value);
-                    }
-
-                    if matches_count > 0 {
-                        slice.shrink_to_fit();
-                        let end = self.current;
-                        return Some(Match { slice, begin, end });
-                    } else {
-                        return self.empty_expression_match();
-                    }
-                }
-                Quantifier::None => {
-                    // Matching expression `x`
-                    if ch == value {
-                        // Successfully matched character in parameter `value`
-                        let slice = String::from(value);
-                        let begin = self.current;
-                        // Make next search start further in `target`
-                        self.advance();
-                        let end = self.current;
-                        return Some(Match { slice, begin, end });
-                    } else {
-                        return None;
-                    }
-                }
-                _ => {
-                    eprintln!("Matching character expressions with quantifiers * and + is not supported yet");
-                    panic!();
-                }
-            }
+        while self.has_next() && self.target[self.current] != value {
+            self.unchecked_advance();
         }
 
-        // Matcher reached end of target string
+        if !self.has_next() {
+            return self.empty_expression_match();
+        }
+
         match quantifier {
-            Quantifier::ZeroOrOne => self.empty_expression_match(),
-            _ => Option::None,
+            Quantifier::None | Quantifier::ZeroOrOne => {
+                // Matching expressions `x` and `x?`
+
+                let slice = String::from(value);
+                let begin = self.current;
+                // Make next search start further in `target`
+                self.advance();
+                let end = self.current;
+                Some(Match { slice, begin, end })
+            }
+            low @ (Quantifier::ZeroOrMore | Quantifier::OneOrMore) => {
+                // Matching expressions `x*` and `x+`
+
+                let begin = self.current;
+                let mut slice = String::with_capacity(self.target.len() - self.current);
+                let mut matches_count = 0usize;
+                while self.has_next() && self.target[self.current] == value {
+                    self.unchecked_advance();
+                    matches_count += 1;
+                    slice.push(value);
+                }
+
+                if (matches!(low, Quantifier::ZeroOrMore) && matches_count > 0)
+                    || (matches!(low, Quantifier::OneOrMore) && matches_count > 1)
+                {
+                    slice.shrink_to_fit();
+                    let end = self.current;
+                    Some(Match { slice, begin, end })
+                } else {
+                    self.empty_expression_match()
+                }
+            }
         }
     }
 }
