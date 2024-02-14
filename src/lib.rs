@@ -7,6 +7,10 @@ pub mod scanner;
 // and transform it into a syntax tree
 pub mod parser;
 
+// Matcher module
+// Use a syntax tree to match against strings
+pub mod matcher;
+
 // Format error as follow:
 // First line prints error type, its position and the specific error name
 // Second line prints source string (string given to parser to process)
