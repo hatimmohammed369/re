@@ -48,8 +48,12 @@ impl Matcher {
         })
     }
 
+    fn has_next(&self) -> bool {
+        self.current < self.target.len()
+    }
+
     fn advance(&mut self) {
-        if self.current < self.target.len() {
+        if self.has_next() {
             self.current += 1;
         }
     }
@@ -122,6 +126,25 @@ impl Matcher {
                         let begin = self.current;
                         // Make next search start further in `target`
                         self.advance();
+                        let end = self.current;
+                        return Some(Match { slice, begin, end });
+                    } else {
+                        return self.empty_expression_match();
+                    }
+                }
+                Quantifier::ZeroOrMore => {
+                    // Matching expressions `x*`
+                    let begin = self.current;
+                    let mut slice = String::with_capacity(self.target.len() - self.current);
+                    let mut matches_count = 0usize;
+                    while self.has_next() && self.target[self.current] == value {
+                        self.current += 1;
+                        matches_count += 1;
+                        slice.push(value);
+                    }
+
+                    if matches_count > 0 {
+                        slice.shrink_to_fit();
                         let end = self.current;
                         return Some(Match { slice, begin, end });
                     } else {
