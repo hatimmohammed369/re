@@ -1,6 +1,6 @@
 // Use a parsed regular expression to match against strings
 
-use crate::parser::{parse, syntax_tree::Regexp};
+use crate::parser::{parse, syntax_tree::*};
 
 // Match operation outcome
 #[allow(dead_code)]
@@ -24,7 +24,7 @@ pub struct Matcher {
     // Parsed pattern
     pattern: Regexp,
     // String on which the search (pattern matching) is done
-    target: String,
+    target: Vec<char>,
     // Where last match ends
     current: usize,
     // True if this Matcher matched the trailing empty string
@@ -37,7 +37,7 @@ impl Matcher {
     // which is matched against `target`
     pub fn new(pattern: &str, target: &str) -> Result<Matcher, String> {
         let pattern = parse(pattern)?;
-        let target = String::from(target);
+        let target = target.chars().collect();
         let current = 0;
         let matched_trailing_empty_string = false;
         Ok(Matcher {
@@ -48,10 +48,58 @@ impl Matcher {
         })
     }
 
+    fn advance(&mut self) {
+        if self.current < self.target.len() {
+            self.current += 1;
+        }
+    }
+
     // Assign a new target to match on
     pub fn assign_match_target(&mut self, target: &str) {
-        self.target = String::from(target);
+        self.target = target.chars().collect();
         self.current = 0;
         self.matched_trailing_empty_string = false;
+    }
+
+    // Find the next match (non-overlaping with previous match)
+    pub fn find_match(&mut self) -> Option<Match> {
+        match &self.pattern.tag {
+            ExpressionTag::EmptyExpression => self.empty_expression_match(),
+            other => {
+                eprintln!("Can not match parsed Regexp pattern with tag `{other:#?}`");
+                panic!();
+            }
+        }
+    }
+
+    // Match current position in `target` against the empty regular expression
+    // this function always succeeds, returning Some(Match)
+    // because the empty string always matches even inside another empty string
+    fn empty_expression_match(&mut self) -> Option<Match> {
+        if self.current >= self.target.len() {
+            if !self.matched_trailing_empty_string {
+                // For completeness sake
+                self.matched_trailing_empty_string = true;
+                let begin = self.target.len();
+                let end = begin;
+                // use (self.target.len()-1) because Rust won't allow indexing with
+                // (self.target.len())
+                // But the matched slice is still the empty string
+                let slice = String::new();
+                Some(Match { slice, begin, end })
+            } else {
+                // Matched the trailing empty string
+                // No more matches available
+                None
+            }
+        } else {
+            // Successfully matched an empty string
+            let begin = self.current;
+            let end = begin;
+            let slice = String::new();
+            // Make next search start futher in `target`
+            self.advance();
+            Some(Match { slice, begin, end })
+        }
     }
 }
