@@ -18,7 +18,7 @@ pub struct Match {
     end: usize,   // end index (exlusive) relative to original target string
 }
 
-// Co-ordinator of the matching process
+// Coordinator of the matching process
 #[allow(dead_code)]
 pub struct Matcher {
     // Parsed pattern
@@ -112,20 +112,47 @@ impl Matcher {
     // Return None indicating failure
     #[allow(unused_variables)]
     fn character_expression_match(&mut self, value: char, quantifier: Quantifier) -> Option<Match> {
-        // For now, ignore `quantifier`
         while let Some(ch) = self.target.get(self.current).copied() {
-            if ch == value {
-                // Successfully matched character in parameter `value`
-                let slice = String::from(value);
-                let begin = self.current;
-                // Make next search start further in `target`
-                self.advance();
-                let end = self.current;
-                return Some(Match { slice, begin, end });
+            match quantifier {
+                Quantifier::ZeroOrOne => {
+                    // Matching expressions `x?`
+                    if ch == value {
+                        // Successfully matched character in parameter `value`
+                        let slice = String::from(value);
+                        let begin = self.current;
+                        // Make next search start further in `target`
+                        self.advance();
+                        let end = self.current;
+                        return Some(Match { slice, begin, end });
+                    } else {
+                        return self.empty_expression_match();
+                    }
+                }
+                Quantifier::None => {
+                    // Matching expression `x`
+                    if ch == value {
+                        // Successfully matched character in parameter `value`
+                        let slice = String::from(value);
+                        let begin = self.current;
+                        // Make next search start further in `target`
+                        self.advance();
+                        let end = self.current;
+                        return Some(Match { slice, begin, end });
+                    } else {
+                        return None;
+                    }
+                }
+                _ => {
+                    eprintln!("Matching character expressions with quantifiers * and + is not supported yet");
+                    panic!();
+                }
             }
-            // Matched failed in current position, move forward (if possible)
-            self.advance();
         }
-        None
+
+        // Matcher reached end of target string
+        match quantifier {
+            Quantifier::ZeroOrOne => self.empty_expression_match(),
+            _ => Option::None,
+        }
     }
 }
