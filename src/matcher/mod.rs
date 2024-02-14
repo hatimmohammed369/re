@@ -63,8 +63,11 @@ impl Matcher {
 
     // Find the next match (non-overlaping with previous match)
     pub fn find_match(&mut self) -> Option<Match> {
-        match &self.pattern.tag {
+        match self.pattern.tag.clone() {
             ExpressionTag::EmptyExpression => self.empty_expression_match(),
+            ExpressionTag::CharacterExpression { value, quantifier } => {
+                self.character_expression_match(value, quantifier)
+            }
             other => {
                 eprintln!("Can not match parsed Regexp pattern with tag `{other:#?}`");
                 panic!();
@@ -97,9 +100,32 @@ impl Matcher {
             let begin = self.current;
             let end = begin;
             let slice = String::new();
-            // Make next search start futher in `target`
+            // Make next search start further in `target`
             self.advance();
             Some(Match { slice, begin, end })
         }
+    }
+
+    // Match current position in `target` against a certain character
+    // If there are still characters to match in `target`, match current against
+    // the one given by the parsed expression `pattern`
+    // Return None indicating failure
+    #[allow(unused_variables)]
+    fn character_expression_match(&mut self, value: char, quantifier: Quantifier) -> Option<Match> {
+        // For now, ignore `quantifier`
+        while let Some(ch) = self.target.get(self.current).copied() {
+            if ch == value {
+                // Successfully matched character in parameter `value`
+                let slice = String::from(value);
+                let begin = self.current;
+                // Make next search start further in `target`
+                self.advance();
+                let end = self.current;
+                return Some(Match { slice, begin, end });
+            }
+            // Matched failed in current position, move forward (if possible)
+            self.advance();
+        }
+        None
     }
 }
