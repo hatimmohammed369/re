@@ -76,6 +76,7 @@ impl Matcher {
             ExpressionTag::CharacterExpression { value, quantifier } => {
                 self.character_expression_match(value, quantifier)
             }
+            ExpressionTag::DotExpression { quantifier } => self.dot_expression_match(quantifier),
             other => {
                 eprintln!("Can not match parsed Regexp pattern with tag `{other:#?}`");
                 panic!();
@@ -118,7 +119,6 @@ impl Matcher {
     // If there are still characters to match in `target`, match current against
     // the one given by the parsed expression `pattern`
     // Return None indicating failure
-    #[allow(unused_variables)]
     fn character_expression_match(&mut self, value: char, quantifier: Quantifier) -> Option<Match> {
         while self.has_next() && self.target[self.current] != value {
             self.unchecked_advance();
@@ -159,6 +159,44 @@ impl Matcher {
                     Some(Match { slice, begin, end })
                 } else {
                     self.empty_expression_match()
+                }
+            }
+        }
+    }
+
+    // Match current position in `target` against any character
+    // Return None indicating failure
+    fn dot_expression_match(&mut self, quantifier: Quantifier) -> Option<Match> {
+        if !self.has_next() {
+            match quantifier {
+                // Matching either `.` or `.+` at end fails
+                Quantifier::None | Quantifier::OneOrMore => Option::None,
+                // Matching either `.?` or `.*` at end yields the empty string
+                _ => self.empty_expression_match(),
+            }
+        } else {
+            match quantifier {
+                // There are more characters to match
+                Quantifier::None | Quantifier::ZeroOrOne => {
+                    // Matching expressions `.` and `.?`
+
+                    // Consume one character
+                    let slice = String::from(self.target[self.current]);
+                    let begin = self.current;
+                    // Make next search start further in `target`
+                    self.advance();
+                    let end = self.current;
+                    Some(Match { slice, begin, end })
+                }
+                Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
+                    // Matching expressions `.*` and `.+`
+
+                    // Consume all remaining characters
+                    let begin = self.current;
+                    self.current = self.target.len();
+                    let end = self.current;
+                    let slice = self.target[begin..].iter().collect::<String>();
+                    Some(Match { slice, begin, end })
                 }
             }
         }
