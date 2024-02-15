@@ -4,19 +4,19 @@
 
 # Items inside double quotes are type literally when writing regular expression
 # ITEM? : ITEM is optional
-# ITEM* : ITEM occurrs zero or more times
-# ITEM+ : ITEM occurrs one or more times
+# ITEM* : ITEM occurs zero or more times
+# ITEM+ : ITEM occurs one or more times
 
 # An arbitrary `RegULAR expRESSION` (hence the name `Regexp`)
-Regexp => Concatenation ( "|" Regexp )*
+Regexp => Concatenation ( "|" Regexp )?
 # An arbitrary regular expression is either:
-# - Concatentation of other regular expressions, like: `a(a|b)(c*z).a` or just `.` or `x`
+# - Concatenation of other regular expressions, like: `a(a|b)(c*z).a` or just `.` or `x`
 # - Alternation of other regular expressions, like: a|(bc)|ccc
-# THUS, Alternation has lower precedence than concatentation
+# THUS, Alternation has lower precedence than concatenation
 
 # An expression of the form: E1E2...E_n
 # placing expressions adjacent to one another with no separators
-# something like `...(a+)(b(c|c))a.b.c.`
+# something like `...(a+)(b(x|y))a.b.c.`
 Concatenation => Primary+
 
 Primary => Empty | QuantifiedExpression
@@ -36,7 +36,7 @@ ZeroOrMore => "*"
 OneOrMore => "+"
 
 # An expression of the form: (E)
-# E is an arbitray expression
+# E is an arbitrary expression
 # something like (abc*)
 Group => "(" Regexp ")"
 
@@ -51,7 +51,7 @@ Character => OrdinaryCharacter | EscapedMetacharacter
 # Any character that is not a metacharacter
 OrdinaryCharacter => [^\(\)\\\|\*\.\?]
 # Note that each character inside the above regular expression (used in this grammar)
-# is preceeded by a slash to strip it from its special meaning
+# is preceded by a slash to strip it from its special meaning
 
 EscapedMetacharacter => "\" Metacharacter
 
@@ -64,7 +64,7 @@ RightParen => ")"
 Slash => "\"
 # A LITTLE SIDE NOTE:
 # In regular expressions, slash \ is metacharacter
-# It is a unary operator preceeding its operand, it's incorrect to use a slash at the end
+# It is a unary operator preceding its operand, it's incorrect to use a slash at the end
 # of a regular expression
 # Given a metacharacter, it produces an expression matching the metacharacter following it
 # so the expression '\|' matches | itself, also '\\' matches a literal slash

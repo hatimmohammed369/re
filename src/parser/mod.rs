@@ -50,15 +50,19 @@ impl Parser {
         // Grab the first token in stream
         self.advance()?;
         match self.parse_expression() {
+            // A syntax error occurred while parsing source string
+            Err(error) => Err(error),
+
+            // Successfully parsed source string
             Ok(option_regexp) => {
                 // `option_regexp` has type Option<Rc<RefCell<Regexp>>>
                 match option_regexp {
                     Some(regexp) => {
                         // When done parsing, take the resulting `Regexp`
                         // and clone (shallow copy) its data
-                        // field `tag` holds data local to expression (namely its type)
+                        // - Field `tag` holds data local to expression (namely its type)
                         // and also it's easily clone
-                        // fields `parent` and `children` hold counted references
+                        // - Fields `parent` and `children` hold counted references
                         // which are easily copied without losing referenced data
                         // those counted references only increase their internal count when cloned
                         let tag = regexp.borrow().tag.clone();
@@ -88,70 +92,110 @@ impl Parser {
                         // Because even an empty source string has at least one
                         // token, namely Empty, thus we can parse a Regexp
                         // with its `tag` field set to ExpressionTag::EmptyExpression
-                        let source = self.scanner.get_source_string();
-                        eprintln!("Could not parse source string `{source}`");
+                        eprintln!(
+                            "Could not parse source string `{}`",
+                            self.scanner.get_source_string()
+                        );
                         panic!()
                     }
                 }
             }
-            // A syntax error occurred while parsing source string
-            Err(error) => Err(error),
         }
     }
 
-    // Regexp => Concatenation ( "|" Regexp )*
+    // Regexp => Concatenation ( "|" Regexp )?
     fn parse_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
-        // Attempt to parse an arbibrary expression
-        // But do that attempt to parse an alternation expression
-        // because alternation has the lowest precedence of all regular expressions operations
-        let alternation = Regexp::new(ExpressionTag::Alternation);
-        while let Some(concatenation) = self.parse_concatenation()? {
-            // Parsed a new expression
-            // append it to field `children` of this `alternation`
-            alternation.children.borrow_mut().push(concatenation);
-            if !self.check(TokenName::Pipe) {
-                // Current token is not a | or
-                // perhaps parser reached end of pattern
-                // this `alternation` expression has ended
-                break;
-            } else {
-                // Consume alternation operator | (pipe)
-                // and then come back to parse more expressions
-                self.advance()?;
-            }
-        }
-
-        // Can't match referenced value to `alternation` becuase it's moved inside `match`
-        let parsed_expressions = alternation.children.borrow().len();
-        match parsed_expressions {
-            0 => {
-                // No expression was parsed, possibly end of pattern
+        match &self.current {
+            None => {
+                // Reached end of input, no expression can be parsed
                 Ok(None)
             }
-            1 => {
-                // One expression was parsed, but alternation expressions are composed
-                // of at least two expressions, thus it makes no sense to return this single
-                // expression as an alternation
-                // Return this expression verbatim
-                Ok(alternation.children.borrow_mut().pop())
-            }
-            _ => {
-                // At least two expressions were parsed
-                // Composed an alternation expression
-                // Its children are already inside it, in Regexp field `children`
-                let alternation = Rc::new(RefCell::new(alternation));
-                alternation
-                    .borrow_mut()
-                    .children
-                    .borrow_mut()
-                    .iter_mut()
-                    .for_each(|child| {
-                        // Make each child obtain a weak reference of its parent `alternation`
-                        child.borrow_mut().parent = Some(Rc::downgrade(&alternation));
-                    });
+            Some(token) => {
+                // There are unprocessed tokens
+                match token.name {
+                    // This token can begin a valid expression
+                    TokenName::Empty
+                    | TokenName::Dot { .. }
+                    | TokenName::Character { .. }
+                    | TokenName::LeftParen => {
+                        // Attempt to parse an arbitrary expression
+                        // But do that attempt to parse an alternation expression
+                        // because alternation has the lowest precedence of all regular expressions operations
+                        let alternation = Regexp::new(ExpressionTag::Alternation);
 
-                // Successfully parsed an alternation expression
-                Ok(Some(alternation))
+                        // First, attempt to parse one concatenation
+                        if let Some(concatenation) = self.parse_concatenation()? {
+                            alternation.children.borrow_mut().push(concatenation);
+
+                            // Parse another alternation only if current token is |
+                            if self.check(TokenName::Pipe) {
+                                // Move past current |
+                                self.advance()?;
+                                if let Some(expression) = self.parse_expression()? {
+                                    // Parsed a new expression
+                                    // append it to field `children` of this `alternation`
+                                    alternation.children.borrow_mut().push(expression);
+                                }
+                            }
+                        }
+
+                        // Can't use `alternation.children.borrow().len()` directly with `match`
+                        // because `alternation` is moved inside `match` body
+                        let parsed_expressions = alternation.children.borrow().len();
+                        match parsed_expressions {
+                            0 => {
+                                // No expression was parsed, possibly end of pattern
+                                Ok(None)
+                            }
+                            1 => {
+                                // One expression was parsed, but alternation expressions are composed
+                                // of at least two expressions, thus it makes no sense to return this single
+                                // expression as an alternation
+                                // Return this expression verbatim
+                                Ok(alternation.children.borrow_mut().pop())
+                            }
+                            _ => {
+                                // At least two expressions were parsed
+                                // Composed an alternation expression
+                                // Its children are already inside it, in Regexp field `children`
+                                let alternation = Rc::new(RefCell::new(alternation));
+                                alternation
+                                    .borrow_mut()
+                                    .children
+                                    .borrow_mut()
+                                    .iter_mut()
+                                    .for_each(|child| {
+                                        // Make each child obtain a weak reference to its parent `alternation`
+                                        child.borrow_mut().parent =
+                                            Some(Rc::downgrade(&alternation));
+                                    });
+
+                                // Successfully parsed an alternation expression
+                                Ok(Some(alternation))
+                            }
+                        }
+                    }
+                    _ => {
+                        // Any token which can not begin a valid expression, like + or *
+                        let source = self.scanner.get_source_string();
+                        let error_char = &source[token.position..=token.position];
+                        let error = format!("Expected expression before {error_char}");
+                        let (error_index, error_position) = {
+                            match &self.current {
+                                Some(Token { position, .. }) => {
+                                    (*position, format!("in position {position}"))
+                                }
+                                None => (source.len(), String::from("at end of pattern")), // in case parser reached end of input
+                            }
+                        };
+                        Err(format_error(
+                            &format!("Syntax error {error_position}: {error}"),
+                            &source,
+                            &[(error_index, 1_u8)],
+                            "",
+                        ))
+                    }
+                }
             }
         }
     }
@@ -165,13 +209,10 @@ impl Parser {
             // Parsed a new expression
             // append it to field `children` of this `alternation`
             concatenation.children.borrow_mut().push(primary_expression);
-            if self.current.is_none() {
-                // Parser reached end of pattern
-                break;
-            }
         }
 
-        // Can't match referenced value to `concatenation` becuase it's moved inside `match`
+        // Can't use `concatenation.children.borrow().len()` directly with `match`
+        // because `concatenation` is moved inside `match` body
         let parsed_expressions = concatenation.children.borrow().len();
         match parsed_expressions {
             0 => {
@@ -196,7 +237,7 @@ impl Parser {
                     .borrow_mut()
                     .iter_mut()
                     .for_each(|child| {
-                        // Make each child obtain a weak reference of its parent `concatenation`
+                        // Make each child obtain a weak reference to its parent `concatenation`
                         child.borrow_mut().parent = Some(Rc::downgrade(&concatenation));
                     });
 
@@ -206,14 +247,14 @@ impl Parser {
         }
     }
 
-    // Primary => Empty | MatchAnyCharacter | Group | MatchCharacter
+    // Primary => Empty | Group | MatchCharacter | MatchAnyCharacter
     fn parse_primary(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
         // WHAT DO YOU DO `parse_primary`?
         // I parse primary expressions, which are:
         // - The empty regular expression
         // - The dot expression `.`
         // - Character expressions like `x`
-        // - Grouped regular expressions, like (abc)
+        // - Grouped regular expressions, like `(abc)`
 
         match &self.current.as_ref() {
             Some(token) => {
@@ -222,17 +263,17 @@ impl Parser {
                     TokenName::Dot => self.parse_the_dot_expression(),
                     TokenName::Character { value, .. } => self.parse_character_expression(*value),
                     TokenName::LeftParen => self.parse_group(),
-                    _ => Ok(None), // Can not parse a primary expression using current token
+                    _ => Ok(None), // Current token can begin a valid expression
                 }
             }
-            None => Ok(None),
+            None => Ok(None), // End of pattern
         }
     }
 
     // Group => "(" Regexp ")"
     fn parse_group(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
         // Attempt to:
-        // First : parse an abitrary expression
+        // First : parse an arbitrary expression
         // Second: After `First` is finished, search for a )
         // If either `First` or `Second` fails, report an error as follow:
         // `First` failed : report error `Expected expression after (`
@@ -252,14 +293,14 @@ impl Parser {
                 // Advance only when current item has name TokenName::RightParent
                 // or report error `Expected ) after expression` (? operator)
                 self.consume(TokenName::RightParen, "Expected ) after expression")?;
-                // field `current` now points to the fisrt character (or Empty token)
+                // field `current` now points to the first character (or Empty token)
                 // after the closing )
 
                 // Construct parsed grouped expression
                 let group = Regexp::new(ExpressionTag::Group {
                     quantifier: self.consume_quantifier()?,
                 });
-                // let `group` take ownershiped of the expression it encloses
+                // let `group` take ownership of the expression it encloses
                 group.children.borrow_mut().push(parsed_expression);
                 // convert `group` to appropriate return type
                 let group = Rc::new(RefCell::new(group));
@@ -356,7 +397,7 @@ impl Parser {
             // There is no group expression currently processed
             // Thus ) was used without its matching (
             // Syntax error!
-            let error = "Un-balanced )\n) is used without a matching (";
+            let error = "Unbalanced )\n) is used without a matching (";
             let source = self.scanner.get_source_string();
             let (error_index, error_position) = {
                 match &self.current {
@@ -366,18 +407,18 @@ impl Parser {
             };
             return Err(format_error(
                 &format!("Syntax error {error_position}: {error}"),
-                &self.scanner.get_source_string(),
+                &source,
                 // Place one (1_u8) caret `^` below error position
                 // in source string as a visual aid
                 &[(error_index, 1_u8)],
                 // Hints
                 "\nTo match a literal ) use \\)\n\
-                To match a metacharacter, preceed it with a slash in your pattern \\\n\
-                To match a *, for instacne, use \\* in your pattern\n\n\
+                To match a metacharacter, precede it with a slash in your pattern \\\n\
+                To match a *, for instance, use \\* in your pattern\n\n\
                 But remember, \\\\ inside your (rust non-raw string) pattern is one slash for the regular expressions engine\n\
                 Hence to match a single literal slash, you write pattern \\\\\\\\\n\
                 The first pair (one slash, operator) escape the second pair (one slash, operand)\n\
-                Or, you can use a raw stirng `r\"\\\\\"",
+                Or, you can use a raw string r\"\\\\\"",
             ));
         } else if self.check(TokenName::LeftParen) {
             // The parser has found a possibly opening (
@@ -388,6 +429,7 @@ impl Parser {
             });
             return Ok(());
         }
+
         Ok(())
     }
 
@@ -434,6 +476,7 @@ impl Parser {
         // Consume each and construct a Quantifier variant
         let quantifier = Quantifier::from(&self.current);
         if !matches!(quantifier, Quantifier::None) {
+            // We found a quantifier, consume it
             self.advance()?;
         }
         Ok(quantifier)

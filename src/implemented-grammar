@@ -2,7 +2,7 @@
 
 # Grammar rules currently implemented in code
 # for more info read file `grammar`
-Regexp => Concatenation ( "|" Regexp )*
+Regexp => Concatenation ( "|" Regexp )?
 
 Concatenation => Primary+
 
