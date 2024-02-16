@@ -243,7 +243,8 @@ impl Iterator for Scanner {
             }
             '\\' => {
                 if (self.current + 1) >= self.source.len() {
-                    eprintln!("Unary operator slash \\ with no operand at end");
+                    eprintln!("FATAL ERROR:");
+                    eprintln!("Unary operator slash \\ with no operand at end\n");
                     panic!();
                 }
 

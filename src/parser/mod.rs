@@ -92,8 +92,9 @@ impl Parser {
                         // Because even an empty source string has at least one
                         // token, namely Empty, thus we can parse a Regexp
                         // with its `tag` field set to ExpressionTag::EmptyExpression
+                        eprintln!("FATAL ERROR:");
                         eprintln!(
-                            "Could not parse source string `{}`",
+                            "Could not parse source string `{}`\n",
                             self.scanner.get_source_string()
                         );
                         panic!()

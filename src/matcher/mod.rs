@@ -78,7 +78,8 @@ impl Matcher {
             }
             ExpressionTag::DotExpression { quantifier } => self.dot_expression_match(quantifier),
             other => {
-                eprintln!("Can not match parsed Regexp pattern with tag `{other:#?}`");
+                eprintln!("FATAL ERROR:");
+                eprintln!("Can not match parsed Regexp pattern with tag `{other:#?}`\n");
                 panic!();
             }
         }
@@ -159,6 +160,13 @@ impl Matcher {
                     Some(Match { slice, begin, end })
                 } else {
                     self.empty_expression_match()
+                    _ => {
+                        eprintln!("FATAL ERROR:");
+                        eprintln!(
+                            "Can not match character expression with quantifier `{quantifier:#?}`\n"
+                        );
+                        panic!()
+                    }
                 }
             }
         }
