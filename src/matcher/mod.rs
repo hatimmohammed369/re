@@ -121,18 +121,25 @@ impl Matcher {
     // the one given by the parsed expression `pattern`
     // Return None indicating failure
     fn character_expression_match(&mut self, value: char, quantifier: Quantifier) -> Option<Match> {
+        // Move forward to the first appearance of `x`
         while self.has_next() && self.target[self.current] != value {
             self.unchecked_advance();
         }
 
         if !self.has_next() {
-            return self.empty_expression_match();
+            return match quantifier {
+                // Matching `x` or `x+` at end fails
+                Quantifier::None | Quantifier::OneOrMore => None,
+                // Matching `x?` or `x*` at end yields the empty string
+                _ => self.empty_expression_match(),
+            };
         }
 
         match quantifier {
             Quantifier::None | Quantifier::ZeroOrOne => {
                 // Matching expressions `x` and `x?`
 
+                // Match a single x
                 let slice = String::from(value);
                 let begin = self.current;
                 // Make next search start further in `target`
@@ -140,34 +147,20 @@ impl Matcher {
                 let end = self.current;
                 Some(Match { slice, begin, end })
             }
-            low @ (Quantifier::ZeroOrMore | Quantifier::OneOrMore) => {
+            Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
                 // Matching expressions `x*` and `x+`
 
+                // Match as many x's as possible
                 let begin = self.current;
-                let mut slice = String::with_capacity(self.target.len() - self.current);
-                let mut matches_count = 0usize;
+                let mut slice = String::with_capacity(self.target.len() - self.current + 1);
                 while self.has_next() && self.target[self.current] == value {
                     self.unchecked_advance();
-                    matches_count += 1;
                     slice.push(value);
                 }
+                slice.shrink_to_fit();
+                let end = self.current;
 
-                if (matches!(low, Quantifier::ZeroOrMore) && matches_count > 0)
-                    || (matches!(low, Quantifier::OneOrMore) && matches_count > 1)
-                {
-                    slice.shrink_to_fit();
-                    let end = self.current;
-                    Some(Match { slice, begin, end })
-                } else {
-                    self.empty_expression_match()
-                    _ => {
-                        eprintln!("FATAL ERROR:");
-                        eprintln!(
-                            "Can not match character expression with quantifier `{quantifier:#?}`\n"
-                        );
-                        panic!()
-                    }
-                }
+                Some(Match { slice, begin, end })
             }
         }
     }
