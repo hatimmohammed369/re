@@ -71,7 +71,7 @@ impl Matcher {
 
     // Find the next match (non-overlaping with previous match)
     pub fn find_match(&mut self) -> Option<Match> {
-        match self.pattern.tag.clone() {
+        let m = match self.pattern.tag.clone() {
             ExpressionTag::EmptyExpression => self.empty_expression_match(),
             ExpressionTag::CharacterExpression { value, quantifier } => {
                 self.character_expression_match(value, quantifier)
@@ -84,7 +84,12 @@ impl Matcher {
                 eprintln!("Can not match parsed Regexp pattern with tag `{other:#?}`\n");
                 panic!();
             }
+        };
+        if m.is_none() {
+            // Attempt to match from the next character
+            self.advance();
         }
+        m
     }
 
     // Match current position in `target` against the empty regular expression
@@ -118,21 +123,16 @@ impl Matcher {
         }
     }
 
-    // Match current position in `target` against a certain character
-    // If there are still characters to match in `target`, match current against
-    // the one given by the parsed expression `pattern`
-    // Return None indicating failure
+    // Match character `value` in current position
+    // If Matcher reached end or current character is not `value` fail (return Option::None)
     fn character_expression_match(&mut self, value: char, quantifier: Quantifier) -> Option<Match> {
-        // Move forward to the first appearance of `x`
-        while self.has_next() && self.target[self.current] != value {
-            self.unchecked_advance();
-        }
-
-        if !self.has_next() {
+        if !self.has_next() || self.target[self.current] != value {
+            // No more characters to match or current character is not `value`
             return match quantifier {
-                // Matching `x` or `x+` at end fails
+                // `x` and `x+` fail when they don't match at least one `x`
                 Quantifier::None | Quantifier::OneOrMore => None,
-                // Matching `x?` or `x*` at end yields the empty string
+
+                // `x?` and `x*` always match, either at least one `x` or the empty string ()
                 _ => self.empty_expression_match(),
             };
         }
@@ -242,6 +242,40 @@ impl Matcher {
                 }
             }
         };
+        self.pattern = parent;
+        child_match
+    }
+
+    fn alternation_match(&mut self) -> Option<Match> {
+        let parent = self.pattern.clone();
+        let mut child_match = None;
+        let children = parent
+            .children
+            .borrow()
+            .iter()
+            .map(|rc| rc.borrow().clone())
+            .collect::<Vec<_>>();
+        for child in children {
+            self.pattern = child;
+            child_match = self.find_match();
+            if child_match.is_none() {
+                // Last match failed
+                // Move backward one step because
+                // find_match executed `self.current += 1`
+                // after the last failed match
+                if self.has_next() {
+                    // Move back only when you have unprocessed characters
+                    // because an expression like `(a+|a*)` in which `a*`
+                    // will be matched at last will make Matcher hop indefinitely
+                    // between self.target.len()-1 and self.target.len()
+                    self.current -= 1;
+                }
+            } else {
+                // One are of the branches matched
+                // Return its match
+                break;
+            }
+        }
         self.pattern = parent;
         child_match
     }
