@@ -71,7 +71,30 @@ impl Matcher {
 
     // Find the next match (non-overlaping with previous match)
     pub fn find_match(&mut self) -> Option<Match> {
-        let m = match self.pattern.tag.clone() {
+        let mut match_attempt;
+        loop {
+            match_attempt = self.compute_match();
+            if match_attempt.is_none() {
+                // Last match failed
+                if self.has_next() {
+                    // Move forward to retry
+                    // ADVANCE
+                    self.advance();
+                } else {
+                    // No more characters to process
+                    // HALT
+                    break;
+                }
+            } else {
+                // Return matched region
+                break;
+            }
+        }
+        match_attempt
+    }
+
+    fn compute_match(&mut self) -> Option<Match> {
+        match self.pattern.tag.clone() {
             ExpressionTag::EmptyExpression => self.empty_expression_match(),
             ExpressionTag::CharacterExpression { value, quantifier } => {
                 self.character_expression_match(value, quantifier)
@@ -84,12 +107,7 @@ impl Matcher {
                 eprintln!("Can not match parsed Regexp pattern with tag `{other:#?}`\n");
                 panic!();
             }
-        };
-        if m.is_none() {
-            // Attempt to match from the next character
-            self.advance();
         }
-        m
     }
 
     // Match current position in `target` against the empty regular expression
@@ -209,7 +227,7 @@ impl Matcher {
         let parent = self.pattern.clone();
         let grouped_expression = self.pattern.children.borrow()[0].borrow().clone();
         self.pattern = grouped_expression;
-        let child_match = match self.find_match() {
+        let child_match = match self.compute_match() {
             Some(match_object) => match quantifier {
                 // Grouped expression succeeded to match
                 Quantifier::None | Quantifier::ZeroOrOne => Some(match_object),
@@ -218,7 +236,7 @@ impl Matcher {
                     let mut end = match_object.end;
                     let mut slice = match_object.slice;
                     slice.reserve(self.target.len() - self.current + 1);
-                    while let Some(new_match) = self.find_match() {
+                    while let Some(new_match) = self.compute_match() {
                         if end == new_match.begin {
                             slice.push_str(&new_match.slice);
                             end = new_match.end;
@@ -247,6 +265,7 @@ impl Matcher {
     }
 
     fn alternation_match(&mut self) -> Option<Match> {
+        let old_position = self.current;
         let parent = self.pattern.clone();
         let mut child_match = None;
         let children = parent
@@ -257,18 +276,10 @@ impl Matcher {
             .collect::<Vec<_>>();
         for child in children {
             self.pattern = child;
-            child_match = self.find_match();
+            child_match = self.compute_match();
             if child_match.is_none() {
-                // Last match failed
-                // Move backward one step because
-                // find_match executed `self.current += 1`
-                // after the last failed match
                 if self.has_next() {
-                    // Move back only when you have unprocessed characters
-                    // because an expression like `(a+|a*)` in which `a*`
-                    // will be matched at last will make Matcher hop indefinitely
-                    // between self.target.len()-1 and self.target.len()
-                    self.current -= 1;
+                    self.current = old_position;
                 }
             } else {
                 // One are of the branches matched
