@@ -98,3 +98,16 @@ impl Regexp {
         }
     }
 }
+
+impl Clone for Regexp {
+    fn clone(&self) -> Self {
+        let tag = self.tag.clone();
+        let parent = self.parent.as_ref().map(Weak::clone);
+        let children = RefCell::new(self.children.borrow().iter().map(Rc::clone).collect());
+        Regexp {
+            tag,
+            parent,
+            children,
+        }
+    }
+}

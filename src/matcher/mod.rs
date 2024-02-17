@@ -77,6 +77,8 @@ impl Matcher {
                 self.character_expression_match(value, quantifier)
             }
             ExpressionTag::DotExpression { quantifier } => self.dot_expression_match(quantifier),
+            ExpressionTag::Group { quantifier } => self.group_match(quantifier),
+            ExpressionTag::Alternation => self.alternation_match(),
             other => {
                 eprintln!("FATAL ERROR:");
                 eprintln!("Can not match parsed Regexp pattern with tag `{other:#?}`\n");
@@ -201,5 +203,46 @@ impl Matcher {
                 }
             }
         }
+    }
+
+    fn group_match(&mut self, quantifier: Quantifier) -> Option<Match> {
+        let parent = self.pattern.clone();
+        let grouped_expression = self.pattern.children.borrow()[0].borrow().clone();
+        self.pattern = grouped_expression;
+        let child_match = match self.find_match() {
+            Some(match_object) => match quantifier {
+                // Grouped expression succeeded to match
+                Quantifier::None | Quantifier::ZeroOrOne => Some(match_object),
+                _ => {
+                    let begin = match_object.begin;
+                    let mut end = match_object.end;
+                    let mut slice = match_object.slice;
+                    slice.reserve(self.target.len() - self.current + 1);
+                    while let Some(new_match) = self.find_match() {
+                        if end == new_match.begin {
+                            slice.push_str(&new_match.slice);
+                            end = new_match.end;
+                        } else {
+                            self.current = end;
+                            break;
+                        }
+                    }
+                    slice.shrink_to_fit();
+                    Some(Match { slice, begin, end })
+                }
+            },
+            None => {
+                // Grouped expression failed to match
+                match quantifier {
+                    // Matching (E) or (E)+ at end fails
+                    Quantifier::None | Quantifier::OneOrMore => Option::None,
+
+                    // Matching (E)? or (E)* at end yiels the empty string
+                    _ => self.empty_expression_match(),
+                }
+            }
+        };
+        self.pattern = parent;
+        child_match
     }
 }
