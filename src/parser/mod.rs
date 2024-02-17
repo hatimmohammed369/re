@@ -104,7 +104,7 @@ impl Parser {
         }
     }
 
-    // Regexp => Concatenation ( "|" Regexp )?
+    // Regexp => Concatenation ( "|" Concatenation )*
     fn parse_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
         match &self.current {
             None => {
@@ -128,11 +128,11 @@ impl Parser {
                         if let Some(concatenation) = self.parse_concatenation()? {
                             alternation.children.borrow_mut().push(concatenation);
 
-                            // Parse another alternation only if current token is |
-                            if self.check(TokenName::Pipe) {
+                            // As long as current token is |, keep parsing concatenations
+                            while self.check(TokenName::Pipe) {
                                 // Move past current |
                                 self.advance()?;
-                                if let Some(expression) = self.parse_expression()? {
+                                if let Some(expression) = self.parse_concatenation()? {
                                     // Parsed a new expression
                                     // append it to field `children` of this `alternation`
                                     alternation.children.borrow_mut().push(expression);
@@ -421,7 +421,8 @@ impl Parser {
                 The first pair (one slash, operator) escape the second pair (one slash, operand)\n\
                 Or, you can use a raw string r\"\\\\\"",
             ));
-        } else if self.check(TokenName::LeftParen) {
+        }
+        if self.check(TokenName::LeftParen) {
             // The parser has found a possibly opening (
             // Note the word `possibly`, if pattern ends with a matching )
             // then the parser will report a syntax error

@@ -8,7 +8,7 @@
 # ITEM+ : ITEM occurs one or more times
 
 # An arbitrary `RegULAR expRESSION` (hence the name `Regexp`)
-Regexp => Concatenation ( "|" Regexp )?
+Regexp => Concatenation ( "|" Concatenation )*
 # An arbitrary regular expression is either:
 # - Concatenation of other regular expressions, like: `a(a|b)(c*z).a` or just `.` or `x`
 # - Alternation of other regular expressions, like: a|(bc)|ccc
