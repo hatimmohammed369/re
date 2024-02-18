@@ -6,30 +6,35 @@ use crate::parser::{parse, syntax_tree::*};
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct Match {
-    // matched region of original target string
-    slice: String,
+    // Matched region of original target string
     // It's the string beginning in index `begin`
     // up to but excluding index `end`
     // For instance:
     // if begin = end = 10, then `slice` is empty
     // if begin = 0 and end = 4, then `slice` is string of characters
     // target[0], target[1], target[2] and target[3]
+    slice: String,
+    // Use a owned string so that Match objects
+    // can be used independently of Matcher
+    // and also Matcher internally stores its matching target
+    // as a Vec<char> because String does NOT allow direct index
+    // which Mathcer needs a lot
     begin: usize, // begin index relative to original target string
-    end: usize,   // end index (exlusive) relative to original target string
+    end: usize,   // end index (exclusive) relative to original target string
 }
 
 // Coordinator of the matching process
 #[allow(dead_code)]
 pub struct Matcher {
-    // Parsed pattern
+    // Currently processed node of the given pattern syntax tree
     pattern: Regexp,
     // String on which the search (pattern matching) is done
     target: Vec<char>,
-    // Where last match ends
+    // Where to start matching
     current: usize,
-    // True if this Matcher matched the trailing empty string
-    // in its `target` string. False otherwise
-    matched_trailing_empty_string: bool,
+    // True if Matcher produces an empty string match in index `current`
+    // False otherwise
+    matched_empty_string: bool,
 }
 
 impl Matcher {
@@ -39,38 +44,74 @@ impl Matcher {
         let pattern = parse(pattern)?;
         let target = target.chars().collect();
         let current = 0;
-        let matched_trailing_empty_string = false;
+        let matched_empty_string = false;
         Ok(Matcher {
             pattern,
             target,
             current,
-            matched_trailing_empty_string,
+            matched_empty_string,
         })
     }
 
-    fn has_next(&self) -> bool {
-        self.current < self.target.len()
+    fn len(&self) -> usize {
+        self.target.len()
     }
 
-    fn advance(&mut self) {
-        if self.has_next() {
-            self.current += 1;
+    fn has_next(&self) -> bool {
+        self.current < self.len()
+    }
+
+    fn set_position(&mut self, pos: usize) {
+        // Ensure that `self.current` is never set to value
+        // greater than self.len() which is self.target.len()
+        let pos = if pos > self.len() { self.len() } else { pos };
+
+        let old_pos = self.current;
+        self.current = pos;
+
+        if old_pos < self.len() || !self.matched_empty_string {
+            // !( old_pos == self.target.len() && self.matched_empty_string )
+            // calling one of `self.set_position` or `self.advance`
+            // ensures that old position (old_pos) is never greater than self.len() which is self.target.len()
+            // so !(old_pos == self.target.len()) is never (old_pos > self.target.len())
+            // hence it MUST be (old_pos < self.target.len())
+
+            // It's NOT the case that we matched the trailing empty string
+            // If we matched the trailing empty string and unset flag `matched_empty_string`
+            // then Matcher would get stuck in a loop, indefinitely matching the trailing empty
+            // because it setting and unsetting flag `matched_empty_string`
+            self.matched_empty_string = false;
         }
     }
 
-    fn unchecked_advance(&mut self) {
+    fn ensure_position_bound(&mut self) {
+        // If `self.current` has a value larger than self.len (equal to self.target.len())
+        if !self.has_next() {
+            // then set it to self.target.len()
+            self.set_position(self.len())
+        }
+    }
+
+    fn advance(&mut self) {
+        // Move one step forward and
+        // ensure self.current is never greater than self.target.len()
         self.current += 1;
+        self.ensure_position_bound();
     }
 
     // Assign a new target to match on
     pub fn assign_match_target(&mut self, target: &str) {
         self.target = target.chars().collect();
-        self.current = 0;
-        self.matched_trailing_empty_string = false;
+        self.set_position(0);
     }
 
-    // Find the next match (non-overlaping with previous match)
+    // Find the next match (non-overlapping with previous match)
     pub fn find_match(&mut self) -> Option<Match> {
+        // WHY WE NEED A LOOP?
+        // Because first match in target string may not be index 0
+        // and hence we need to keep matching until we hit the first match
+        // or reach end of target
+
         let mut match_attempt;
         loop {
             match_attempt = self.compute_match();
@@ -87,6 +128,13 @@ impl Matcher {
                 }
             } else {
                 // Return matched region
+                if match_attempt.as_ref().unwrap().slice.is_empty() {
+                    // Matched the empty string in current position
+                    // Matcher MUST advance or it will loop endlessly
+                    // matching the empty string at the same position
+                    // because the empty string can match anywhere
+                    self.advance();
+                }
                 break;
             }
         }
@@ -102,11 +150,7 @@ impl Matcher {
             ExpressionTag::DotExpression { quantifier } => self.dot_expression_match(quantifier),
             ExpressionTag::Group { quantifier } => self.group_match(quantifier),
             ExpressionTag::Alternation => self.alternation_match(),
-            other => {
-                eprintln!("FATAL ERROR:");
-                eprintln!("Can not match parsed Regexp pattern with tag `{other:#?}`\n");
-                panic!();
-            }
+            ExpressionTag::Concatenation => self.concatenation_match(),
         }
     }
 
@@ -114,30 +158,20 @@ impl Matcher {
     // this function always succeeds, returning Some(Match)
     // because the empty string always matches even inside another empty string
     fn empty_expression_match(&mut self) -> Option<Match> {
-        if self.current >= self.target.len() {
-            if !self.matched_trailing_empty_string {
-                // For completeness sake
-                self.matched_trailing_empty_string = true;
-                let begin = self.target.len();
-                let end = begin;
-                // use (self.target.len()-1) because Rust won't allow indexing with
-                // (self.target.len())
-                // But the matched slice is still the empty string
-                let slice = String::new();
-                Some(Match { slice, begin, end })
-            } else {
-                // Matched the trailing empty string
-                // No more matches available
-                None
-            }
-        } else {
-            // Successfully matched an empty string
-            let begin = self.current;
-            let end = begin;
+        if !self.matched_empty_string || self.has_next() {
+            // Not matched empty string here or not all characters processed
+            // logical negation of: Matched trailing empty string
+            // which is (self.matched_empty_string && !self.has_next())
+            self.matched_empty_string = true;
             let slice = String::new();
-            // Make next search start further in `target`
-            self.advance();
+            let begin = self.current;
+            let end = self.current;
             Some(Match { slice, begin, end })
+        } else {
+            // Matched trailing empty string
+            // Target string is completely consumed
+            // NO MORE MATCHES FOR THIS TARGET
+            None
         }
     }
 
@@ -172,9 +206,9 @@ impl Matcher {
 
                 // Match as many x's as possible
                 let begin = self.current;
-                let mut slice = String::with_capacity(self.target.len() - self.current + 1);
+                let mut slice = String::with_capacity(self.len() - self.current + 1);
                 while self.has_next() && self.target[self.current] == value {
-                    self.unchecked_advance();
+                    self.advance();
                     slice.push(value);
                 }
                 slice.shrink_to_fit();
@@ -214,7 +248,7 @@ impl Matcher {
 
                     // Consume all remaining characters
                     let begin = self.current;
-                    self.current = self.target.len();
+                    self.set_position(self.len());
                     let end = self.current;
                     let slice = self.target[begin..].iter().collect::<String>();
                     Some(Match { slice, begin, end })
@@ -235,13 +269,13 @@ impl Matcher {
                     let begin = match_object.begin;
                     let mut end = match_object.end;
                     let mut slice = match_object.slice;
-                    slice.reserve(self.target.len() - self.current + 1);
+                    slice.reserve(self.len() - self.current + 1);
                     while let Some(new_match) = self.compute_match() {
                         if end == new_match.begin {
                             slice.push_str(&new_match.slice);
                             end = new_match.end;
                         } else {
-                            self.current = end;
+                            self.set_position(end);
                             break;
                         }
                     }
@@ -255,7 +289,7 @@ impl Matcher {
                     // Matching (E) or (E)+ at end fails
                     Quantifier::None | Quantifier::OneOrMore => Option::None,
 
-                    // Matching (E)? or (E)* at end yiels the empty string
+                    // Matching (E)? or (E)* at end yields the empty string
                     _ => self.empty_expression_match(),
                 }
             }
@@ -279,7 +313,7 @@ impl Matcher {
             child_match = self.compute_match();
             if child_match.is_none() {
                 if self.has_next() {
-                    self.current = old_position;
+                    self.set_position(old_position);
                 }
             } else {
                 // One are of the branches matched
@@ -289,5 +323,70 @@ impl Matcher {
         }
         self.pattern = parent;
         child_match
+    }
+
+    fn concatenation_match(&mut self) -> Option<Match> {
+        let old_position = self.current;
+
+        let mut match_region = {
+            let slice = String::with_capacity(self.len() - self.current + 1);
+            let begin = self.current;
+            let end = self.current;
+            Match { slice, begin, end }
+        };
+
+        let parent = self.pattern.clone();
+
+        // Match first item
+        self.pattern = parent.children.borrow()[0].borrow().clone();
+        match self.compute_match() {
+            Some(match_obj) => {
+                // First item matched
+                match_region.slice.push_str(&match_obj.slice);
+                match_region.end = match_obj.end;
+            }
+            None => {
+                // First item FAILED
+                // Restore old position and old pattern
+                self.pattern = parent.clone();
+                self.set_position(old_position);
+                return None;
+            }
+        };
+
+        // Match remaining items
+        let children = parent.children.borrow()[1..]
+            .iter()
+            .map(|rc| rc.borrow().clone())
+            .collect::<Vec<_>>();
+
+        for child in children {
+            self.pattern = child;
+            match self.compute_match() {
+                Some(match_obj) => {
+                    // If this expression matched, then its match begins
+                    // right after the match of its predecessor
+                    // that's because Matcher field `self.current`
+                    // is never incremented before doing the actual matching
+                    // but it's incremented after a successful match
+                    match_region.slice.push_str(&match_obj.slice);
+                    match_region.end = match_obj.end;
+                }
+                None => {
+                    // An item failed to match
+                    // the whole concatenation expression fails
+                    // Restore old position and old pattern
+                    self.pattern = parent;
+                    self.set_position(old_position);
+                    return None;
+                }
+            }
+        }
+
+        // Match successful
+        match_region.slice.shrink_to_fit();
+        // Restore parent (concatentation) pattern
+        self.pattern = parent.clone();
+        Some(match_region)
     }
 }
