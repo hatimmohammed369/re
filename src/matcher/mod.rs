@@ -258,13 +258,16 @@ impl Matcher {
     }
 
     fn group_match(&mut self, quantifier: Quantifier) -> Option<Match> {
-        let parent = self.pattern.clone();
+        let old_pattern = self.pattern.clone();
         let grouped_expression = self.pattern.children.borrow()[0].borrow().clone();
         self.pattern = grouped_expression;
         let child_match = match self.compute_match() {
             Some(match_object) => match quantifier {
                 // Grouped expression succeeded to match
+                // Matching (E) and (E)?
                 Quantifier::None | Quantifier::ZeroOrOne => Some(match_object),
+
+                // Matching (E)* and (E)+
                 _ => {
                     let begin = match_object.begin;
                     let mut end = match_object.end;
@@ -286,23 +289,23 @@ impl Matcher {
             None => {
                 // Grouped expression failed to match
                 match quantifier {
-                    // Matching (E) or (E)+ at end fails
+                    // (E) and (E)+ fail when E fails
                     Quantifier::None | Quantifier::OneOrMore => Option::None,
 
-                    // Matching (E)? or (E)* at end yields the empty string
+                    // (E)? and (E)* match empty string when E fails
                     _ => self.empty_expression_match(),
                 }
             }
         };
-        self.pattern = parent;
+        self.pattern = old_pattern;
         child_match
     }
 
     fn alternation_match(&mut self) -> Option<Match> {
         let old_position = self.current;
-        let parent = self.pattern.clone();
+        let old_pattern = self.pattern.clone();
         let mut child_match = None;
-        let children = parent
+        let children = old_pattern
             .children
             .borrow()
             .iter()
@@ -321,7 +324,7 @@ impl Matcher {
                 break;
             }
         }
-        self.pattern = parent;
+        self.pattern = old_pattern;
         child_match
     }
 
@@ -335,10 +338,10 @@ impl Matcher {
             Match { slice, begin, end }
         };
 
-        let parent = self.pattern.clone();
+        let old_pattern = self.pattern.clone();
 
         // Match first item
-        self.pattern = parent.children.borrow()[0].borrow().clone();
+        self.pattern = old_pattern.children.borrow()[0].borrow().clone();
         match self.compute_match() {
             Some(match_obj) => {
                 // First item matched
@@ -348,14 +351,14 @@ impl Matcher {
             None => {
                 // First item FAILED
                 // Restore old position and old pattern
-                self.pattern = parent.clone();
+                self.pattern = old_pattern.clone();
                 self.set_position(old_position);
                 return None;
             }
         };
 
         // Match remaining items
-        let children = parent.children.borrow()[1..]
+        let children = old_pattern.children.borrow()[1..]
             .iter()
             .map(|rc| rc.borrow().clone())
             .collect::<Vec<_>>();
@@ -376,7 +379,7 @@ impl Matcher {
                     // An item failed to match
                     // the whole concatenation expression fails
                     // Restore old position and old pattern
-                    self.pattern = parent;
+                    self.pattern = old_pattern;
                     self.set_position(old_position);
                     return None;
                 }
@@ -385,8 +388,8 @@ impl Matcher {
 
         // Match successful
         match_region.slice.shrink_to_fit();
-        // Restore parent (concatentation) pattern
-        self.pattern = parent.clone();
+        // Restore old pattern
+        self.pattern = old_pattern.clone();
         Some(match_region)
     }
 }
