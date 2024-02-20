@@ -3,7 +3,6 @@
 use crate::parser::{parse, syntax_tree::*};
 
 // Match operation outcome
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Match {
     // Matched region of original target string
@@ -48,7 +47,6 @@ struct ExpressionBacktrackInfo {
 }
 
 // Coordinator of the matching process
-#[allow(dead_code)]
 pub struct Matcher {
     // Currently processed node of the given pattern syntax tree
     pattern: Regexp,
@@ -195,242 +193,313 @@ impl Matcher {
         }
     }
 
+    fn dive(&mut self) {
+        // Begin matching a child of current patttern
+        self.pattern_index_sequence.push(0);
+    }
+
+    fn bubble_up(&mut self) {
+        // Done matching current pattern, go up back to its parent
+        self.pattern_index_sequence.pop();
+    }
+
+    fn appoint_next_child(&mut self) {
+        // Begin matching a sibling of current pattern
+        *self.pattern_index_sequence.last_mut().unwrap() += 1;
+    }
+
     // Match current position in `target` against the empty regular expression
     // this function always succeeds, returning Some(Match)
     // because the empty string always matches even inside another empty string
     fn empty_expression_match(&mut self) -> Option<Match> {
-        if !self.matched_empty_string || self.has_next() {
-            // Not matched empty string here or not all characters processed
-            // logical negation of: Matched trailing empty string
-            // which is (self.matched_empty_string && !self.has_next())
-            self.matched_empty_string = true;
-            let slice = String::new();
-            let begin = self.current;
-            let end = self.current;
-            Some(Match { slice, begin, end })
-        } else {
-            // Matched trailing empty string
-            // Target string is completely consumed
-            // NO MORE MATCHES FOR THIS TARGET
-            None
-        }
+        self.dive();
+
+        let empty_string_match = {
+            // Match an empty string
+
+            if !self.matched_empty_string || self.has_next() {
+                // Not matched empty string here or not all characters processed
+                // logical negation of: Matched trailing empty string
+                // which is (self.matched_empty_string && !self.has_next())
+                self.matched_empty_string = true;
+                let slice = String::new();
+                let begin = self.current;
+                let end = self.current;
+                Some(Match { slice, begin, end })
+            } else {
+                // Matched trailing empty string
+                // Target string is completely consumed
+                // NO MORE MATCHES FOR THIS TARGET
+                None
+            }
+
+            // Empty string match computation ends
+        };
+
+        self.bubble_up();
+        empty_string_match
     }
 
     // Match character `value` in current position
     // If Matcher reached end or current character is not `value` fail (return Option::None)
     fn character_expression_match(&mut self, value: char, quantifier: Quantifier) -> Option<Match> {
-        if !self.has_next() || self.target[self.current] != value {
-            // No more characters to match or current character is not `value`
-            return match quantifier {
-                // `x` and `x+` fail when they don't match at least one `x`
-                Quantifier::None | Quantifier::OneOrMore => None,
+        self.dive();
 
-                // `x?` and `x*` always match, either at least one `x` or the empty string ()
-                _ => self.empty_expression_match(),
-            };
-        }
+        let character_expression_match = {
+            // Match a character expression
 
-        match quantifier {
-            Quantifier::None | Quantifier::ZeroOrOne => {
-                // Matching expressions `x` and `x?`
+            if !self.has_next() || self.target[self.current] != value {
+                // No more characters to match or current character is not `value`
+                match quantifier {
+                    // `x` and `x+` fail when they don't match at least one `x`
+                    Quantifier::None | Quantifier::OneOrMore => None,
 
-                // Match a single x
-                let slice = String::from(value);
-                let begin = self.current;
-                // Make next search start further in `target`
-                self.advance();
-                let end = self.current;
-                Some(Match { slice, begin, end })
-            }
-            Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
-                // Matching expressions `x*` and `x+`
-
-                // Match as many x's as possible
-                let begin = self.current;
-                let mut slice = String::with_capacity(self.len() - self.current + 1);
-                while self.has_next() && self.target[self.current] == value {
-                    self.advance();
-                    slice.push(value);
+                    // `x?` and `x*` always match, either at least one `x` or the empty string ()
+                    _ => self.empty_expression_match(),
                 }
-                slice.shrink_to_fit();
-                let end = self.current;
+            } else {
+                match quantifier {
+                    Quantifier::None | Quantifier::ZeroOrOne => {
+                        // Matching expressions `x` and `x?`
 
-                Some(Match { slice, begin, end })
+                        // Match a single x
+                        let slice = String::from(value);
+                        let begin = self.current;
+                        // Make next search start further in `target`
+                        self.advance();
+                        let end = self.current;
+                        Some(Match { slice, begin, end })
+                    }
+                    Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
+                        // Matching expressions `x*` and `x+`
+
+                        // Match as many x's as possible
+                        let begin = self.current;
+                        let mut slice = String::with_capacity(self.len() - self.current + 1);
+                        while self.has_next() && self.target[self.current] == value {
+                            self.advance();
+                            slice.push(value);
+                        }
+                        slice.shrink_to_fit();
+                        let end = self.current;
+
+                        Some(Match { slice, begin, end })
+                    }
+                }
             }
-        }
+
+            // Character expression match computation ends
+        };
+
+        self.bubble_up();
+        character_expression_match
     }
 
     // Match current position in `target` against any character
     // Return None indicating failure
     fn dot_expression_match(&mut self, quantifier: Quantifier) -> Option<Match> {
-        if !self.has_next() {
-            match quantifier {
-                // Matching either `.` or `.+` at end fails
-                Quantifier::None | Quantifier::OneOrMore => Option::None,
-                // Matching either `.?` or `.*` at end yields the empty string
-                _ => self.empty_expression_match(),
-            }
-        } else {
-            match quantifier {
-                // There are more characters to match
-                Quantifier::None | Quantifier::ZeroOrOne => {
-                    // Matching expressions `.` and `.?`
+        self.dive();
 
-                    // Consume one character
-                    let slice = String::from(self.target[self.current]);
-                    let begin = self.current;
-                    // Make next search start further in `target`
-                    self.advance();
-                    let end = self.current;
-                    Some(Match { slice, begin, end })
-                }
-                Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
-                    // Matching expressions `.*` and `.+`
+        let dot_expression_match = {
+            // Match a dot expression
 
-                    // Consume all remaining characters
-                    let begin = self.current;
-                    self.set_position(self.len());
-                    let end = self.current;
-                    let slice = self.target[begin..].iter().collect::<String>();
-                    Some(Match { slice, begin, end })
+            if !self.has_next() {
+                match quantifier {
+                    // Matching either `.` or `.+` at end fails
+                    Quantifier::None | Quantifier::OneOrMore => Option::None,
+                    // Matching either `.?` or `.*` at end yields the empty string
+                    _ => self.empty_expression_match(),
+                }
+            } else {
+                match quantifier {
+                    // There are more characters to match
+                    Quantifier::None | Quantifier::ZeroOrOne => {
+                        // Matching expressions `.` and `.?`
+
+                        // Consume one character
+                        let slice = String::from(self.target[self.current]);
+                        let begin = self.current;
+                        // Make next search start further in `target`
+                        self.advance();
+                        let end = self.current;
+                        Some(Match { slice, begin, end })
+                    }
+                    Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
+                        // Matching expressions `.*` and `.+`
+
+                        // Consume all remaining characters
+                        let begin = self.current;
+                        self.set_position(self.len());
+                        let end = self.current;
+                        let slice = self.target[begin..].iter().collect::<String>();
+                        Some(Match { slice, begin, end })
+                    }
                 }
             }
-        }
+
+            // Dot expression match computation ends
+        };
+
+        self.bubble_up();
+        dot_expression_match
     }
 
     fn group_match(&mut self, quantifier: Quantifier) -> Option<Match> {
+        self.dive();
+
         let old_pattern = self.pattern.clone();
-        let grouped_expression = self.pattern.children.borrow()[0].borrow().clone();
-        self.pattern = grouped_expression;
-        let child_match = match self.compute_match() {
-            Some(match_object) => match quantifier {
-                // Grouped expression succeeded to match
-                // Matching (E) and (E)?
-                Quantifier::None | Quantifier::ZeroOrOne => Some(match_object),
+        self.pattern = old_pattern.children.borrow()[0].borrow().clone();
 
-                // Matching (E)* and (E)+
-                _ => {
-                    let begin = match_object.begin;
-                    let mut end = match_object.end;
-                    let mut slice = match_object.slice;
-                    slice.reserve(self.len() - self.current + 1);
-                    while let Some(new_match) = self.compute_match() {
-                        if end == new_match.begin {
-                            slice.push_str(&new_match.slice);
-                            end = new_match.end;
-                        } else {
-                            self.set_position(end);
-                            break;
+        let grouped_expression_mactch = {
+            // Match a grouped expression
+
+            match self.compute_match() {
+                Some(match_object) => match quantifier {
+                    // Grouped expression succeeded to match
+                    // Matching (E) and (E)?
+                    Quantifier::None | Quantifier::ZeroOrOne => Some(match_object),
+
+                    // Matching (E)* and (E)+
+                    _ => {
+                        let begin = match_object.begin;
+                        let mut end = match_object.end;
+                        let mut slice = match_object.slice;
+                        slice.reserve(self.len() - self.current + 1);
+                        while let Some(new_match) = self.compute_match() {
+                            if end == new_match.begin {
+                                slice.push_str(&new_match.slice);
+                                end = new_match.end;
+                            } else {
+                                self.set_position(end);
+                                break;
+                            }
                         }
+                        slice.shrink_to_fit();
+                        Some(Match { slice, begin, end })
                     }
-                    slice.shrink_to_fit();
-                    Some(Match { slice, begin, end })
-                }
-            },
-            None => {
-                // Grouped expression failed to match
-                match quantifier {
-                    // (E) and (E)+ fail when E fails
-                    Quantifier::None | Quantifier::OneOrMore => Option::None,
+                },
+                None => {
+                    // Grouped expression failed to match
+                    match quantifier {
+                        // (E) and (E)+ fail when E fails
+                        Quantifier::None | Quantifier::OneOrMore => Option::None,
 
-                    // (E)? and (E)* match empty string when E fails
-                    _ => self.empty_expression_match(),
+                        // (E)? and (E)* match empty string when E fails
+                        _ => self.empty_expression_match(),
+                    }
                 }
             }
+
+            // Grouped expression computation ends
         };
+
         self.pattern = old_pattern;
-        child_match
+        self.bubble_up();
+        grouped_expression_mactch
     }
 
     fn alternation_match(&mut self) -> Option<Match> {
-        let old_position = self.current;
+        self.dive();
+
         let old_pattern = self.pattern.clone();
-        let mut child_match = None;
-        let children = old_pattern
-            .children
-            .borrow()
-            .iter()
-            .map(|rc| rc.borrow().clone())
-            .collect::<Vec<_>>();
-        for child in children {
-            self.pattern = child;
-            child_match = self.compute_match();
-            if child_match.is_none() {
-                if self.has_next() {
+
+        let alternation_match = {
+            // Match an alternation expression
+
+            let old_position = self.current;
+            let mut child_match = None;
+            let children = old_pattern
+                .children
+                .borrow()
+                .iter()
+                .map(|rc| rc.borrow().clone())
+                .collect::<Vec<_>>();
+            for child in children {
+                self.appoint_next_child();
+                self.pattern = child;
+                child_match = self.compute_match();
+                if child_match.is_none() {
                     self.set_position(old_position);
+                } else {
+                    // One are of the branches matched
+                    // Return its match
+                    break;
                 }
-            } else {
-                // One are of the branches matched
-                // Return its match
-                break;
             }
-        }
+
+            // Alternation expression match computation ends
+            child_match
+        };
+
         self.pattern = old_pattern;
-        child_match
+        self.bubble_up();
+        alternation_match
     }
 
     fn concatenation_match(&mut self) -> Option<Match> {
-        let old_position = self.current;
-
-        let mut match_region = {
-            let slice = String::with_capacity(self.len() - self.current + 1);
-            let begin = self.current;
-            let end = self.current;
-            Match { slice, begin, end }
-        };
-
         let old_pattern = self.pattern.clone();
 
-        // Match first item
-        self.pattern = old_pattern.children.borrow()[0].borrow().clone();
-        match self.compute_match() {
-            Some(match_obj) => {
-                // First item matched
-                match_region.slice.push_str(&match_obj.slice);
-                match_region.end = match_obj.end;
-            }
-            None => {
-                // First item FAILED
-                // Restore old position and old pattern
-                self.pattern = old_pattern.clone();
-                self.set_position(old_position);
-                return None;
-            }
-        };
+        let concatenation_match = {
+            // Match a concatenation expression
 
-        // Match remaining items
-        let children = old_pattern.children.borrow()[1..]
-            .iter()
-            .map(|rc| rc.borrow().clone())
-            .collect::<Vec<_>>();
+            let old_position = self.current;
+            let mut match_region_end;
 
-        for child in children {
-            self.pattern = child;
+            // Match first item
+            self.pattern = old_pattern.children.borrow()[0].borrow().clone();
             match self.compute_match() {
                 Some(match_obj) => {
-                    // If this expression matched, then its match begins
-                    // right after the match of its predecessor
-                    // that's because Matcher field `self.current`
-                    // is never incremented before doing the actual matching
-                    // but it's incremented after a successful match
-                    match_region.slice.push_str(&match_obj.slice);
-                    match_region.end = match_obj.end;
+                    // First item matched
+                    match_region_end = match_obj.end;
                 }
                 None => {
-                    // An item failed to match
-                    // the whole concatenation expression fails
+                    // First item FAILED
                     // Restore old position and old pattern
-                    self.pattern = old_pattern;
+                    self.pattern = old_pattern.clone();
                     self.set_position(old_position);
                     return None;
                 }
-            }
-        }
+            };
 
-        // Match successful
-        match_region.slice.shrink_to_fit();
-        // Restore old pattern
+            // Match remaining items
+            let children = old_pattern.children.borrow()[1..]
+                .iter()
+                .map(|rc| rc.borrow().clone())
+                .collect::<Vec<_>>();
+
+            for child in children {
+                self.appoint_next_child();
+                self.pattern = child;
+                match self.compute_match() {
+                    Some(match_obj) => {
+                        // If this expression matched, then its match begins
+                        // right after the match of its predecessor
+                        // that's because Matcher field `self.current`
+                        // is never incremented before doing the actual matching
+                        // but it's incremented after a successful match
+                        match_region_end = match_obj.end;
+                    }
+                    None => {
+                        // An item failed to match
+                        // the whole concatenation expression fails
+                        // Restore old position and old pattern
+                        self.pattern = old_pattern;
+                        self.set_position(old_position);
+                        return None;
+                    }
+                }
+            }
+
+            // Concatenation expression match computation ends
+            Some(Match {
+                slice: self.target[old_position..match_region_end].iter().collect(),
+                begin: old_position,
+                end: match_region_end,
+            })
+        };
+
         self.pattern = old_pattern.clone();
-        Some(match_region)
+        self.bubble_up();
+        concatenation_match
     }
 }
