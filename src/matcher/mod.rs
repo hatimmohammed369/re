@@ -90,26 +90,24 @@ impl Matcher {
         })
     }
 
-    fn len(&self) -> usize {
-        self.target.len()
-    }
-
     fn has_next(&self) -> bool {
-        self.current < self.len()
+        self.current < self.target.len()
     }
 
     fn set_position(&mut self, pos: usize) {
-        // Ensure that `self.current` is never set to value
-        // greater than self.len() which is self.target.len()
-        let pos = if pos > self.len() { self.len() } else { pos };
+        let pos = if pos > self.target.len() {
+            self.target.len()
+        } else {
+            pos
+        };
 
         let old_pos = self.current;
         self.current = pos;
 
-        if old_pos < self.len() || !self.matched_empty_string {
+        if old_pos < self.target.len() || !self.matched_empty_string {
             // !( old_pos == self.target.len() && self.matched_empty_string )
             // calling one of `self.set_position` or `self.advance`
-            // ensures that old position (old_pos) is never greater than self.len() which is self.target.len()
+            // ensures that old position (old_pos) is never greater than self.target.len()
             // so !(old_pos == self.target.len()) is never (old_pos > self.target.len())
             // hence it MUST be (old_pos < self.target.len())
 
@@ -121,19 +119,10 @@ impl Matcher {
         }
     }
 
-    fn ensure_position_bound(&mut self) {
-        // If `self.current` has a value larger than self.len (equal to self.target.len())
-        if !self.has_next() {
-            // then set it to self.target.len()
-            self.set_position(self.len())
-        }
-    }
-
     fn advance(&mut self) {
-        // Move one step forward and
-        // ensure self.current is never greater than self.target.len()
-        self.current += 1;
-        self.ensure_position_bound();
+        if self.current < self.target.len() {
+            self.current += 1;
+        }
     }
 
     // Assign a new target to match on
@@ -249,19 +238,21 @@ impl Matcher {
             // Match a character expression
 
             if !self.has_next() || self.target[self.current] != value {
-                // No more characters to match or current character is not `value`
+                // No more characters to match or current character is not `x`
                 match quantifier {
-                    // `x` and `x+` fail when they don't match at least one `x`
+                    // Matching `x` or `x+` at end fails
                     Quantifier::None | Quantifier::OneOrMore => None,
 
-                    // `x?` and `x*` always match, either at least one `x` or the empty string ()
+                    // Expressions `x?` and `x*` at end match the empty string
                     _ => self.empty_expression_match(),
                 }
             } else {
+                // There is at least one unmatched `x`
                 match quantifier {
                     Quantifier::None | Quantifier::ZeroOrOne => {
                         // Matching expressions `x` and `x?`
 
+                        // Remember, `x?` is greedy
                         // Match a single x
                         let slice = String::from(value);
                         let begin = self.current;
@@ -275,7 +266,7 @@ impl Matcher {
 
                         // Match as many x's as possible
                         let begin = self.current;
-                        let mut slice = String::with_capacity(self.len() - self.current + 1);
+                        let mut slice = String::with_capacity(self.target.len() - self.current + 1);
                         while self.has_next() && self.target[self.current] == value {
                             self.advance();
                             slice.push(value);
@@ -304,18 +295,21 @@ impl Matcher {
             // Match a dot expression
 
             if !self.has_next() {
+                // No more characters to match
                 match quantifier {
-                    // Matching either `.` or `.+` at end fails
+                    // Matching `.` or `.+` at end fails
                     Quantifier::None | Quantifier::OneOrMore => Option::None,
-                    // Matching either `.?` or `.*` at end yields the empty string
+
+                    // Expressions `.?` and `.*` at end match the empty string
                     _ => self.empty_expression_match(),
                 }
             } else {
+                // There is at least one unmatched character
                 match quantifier {
-                    // There are more characters to match
                     Quantifier::None | Quantifier::ZeroOrOne => {
                         // Matching expressions `.` and `.?`
 
+                        // Remember, `.?` is greedy
                         // Consume one character
                         let slice = String::from(self.target[self.current]);
                         let begin = self.current;
@@ -329,7 +323,7 @@ impl Matcher {
 
                         // Consume all remaining characters
                         let begin = self.current;
-                        self.set_position(self.len());
+                        self.set_position(self.target.len());
                         let end = self.current;
                         let slice = self.target[begin..].iter().collect::<String>();
                         Some(Match { slice, begin, end })
@@ -354,32 +348,27 @@ impl Matcher {
             // Match a grouped expression
 
             match self.compute_match() {
-                Some(match_object) => match quantifier {
-                    // Grouped expression succeeded to match
-                    // Matching (E) and (E)?
-                    Quantifier::None | Quantifier::ZeroOrOne => Some(match_object),
+                Some(mut match_object) => {
+                    // Grouped expression match succeeded
+                    match quantifier {
+                        // Matching (E) and (E)?
+                        Quantifier::None | Quantifier::ZeroOrOne => Some(match_object),
+                        // Return whatever E returned
 
-                    // Matching (E)* and (E)+
-                    _ => {
-                        let begin = match_object.begin;
-                        let mut end = match_object.end;
-                        let mut slice = match_object.slice;
-                        slice.reserve(self.len() - self.current + 1);
-                        while let Some(new_match) = self.compute_match() {
-                            if end == new_match.begin {
-                                slice.push_str(&new_match.slice);
-                                end = new_match.end;
-                            } else {
-                                self.set_position(end);
-                                break;
+                        // Matching (E)* and (E)+
+                        _ => {
+                            let mut match_end = self.current;
+                            while let Some(new_match) = self.compute_match() {
+                                match_end = new_match.end;
                             }
+                            match_object.slice =
+                                self.target[match_object.begin..match_end].iter().collect();
+                            Some(match_object)
                         }
-                        slice.shrink_to_fit();
-                        Some(Match { slice, begin, end })
                     }
-                },
+                }
                 None => {
-                    // Grouped expression failed to match
+                    // Grouped expression match failed
                     match quantifier {
                         // (E) and (E)+ fail when E fails
                         Quantifier::None | Quantifier::OneOrMore => Option::None,
@@ -441,35 +430,19 @@ impl Matcher {
 
         let concatenation_match = {
             // Match a concatenation expression
-
             let old_position = self.current;
-            let mut match_region_end;
 
-            // Match first item
-            self.pattern = old_pattern.children.borrow()[0].borrow().clone();
-            match self.compute_match() {
-                Some(match_obj) => {
-                    // First item matched
-                    match_region_end = match_obj.end;
-                }
-                None => {
-                    // First item FAILED
-                    // Restore old position and old pattern
-                    self.pattern = old_pattern.clone();
-                    self.set_position(old_position);
-                    return None;
-                }
-            };
-
-            // Match remaining items
-            let children = old_pattern.children.borrow()[1..]
+            let children = old_pattern
+                .children
+                .borrow()
                 .iter()
                 .map(|rc| rc.borrow().clone())
                 .collect::<Vec<_>>();
 
+            let mut match_region_end = self.current;
             for child in children {
-                self.appoint_next_child();
                 self.pattern = child;
+                self.appoint_next_child();
                 match self.compute_match() {
                     Some(match_obj) => {
                         // If this expression matched, then its match begins
