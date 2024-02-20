@@ -23,6 +23,30 @@ pub struct Match {
     end: usize,   // end index (exclusive) relative to original target string
 }
 
+#[allow(dead_code)]
+// Backtracking information of a single expression
+// Objects of this struct is used when an expression
+// performs more than one backtrack
+struct ExpressionBacktrackInfo {
+    // The last item in this Vec represent the index of current pattern among its siblings in
+    // current syntax tree level
+    // All other items represent the index of its parents amongs their siblings with the same
+    // syntax tree level
+    index_sequence: Vec<usize>,
+
+    // Position of first successful match of the associated expression
+    first_match_begin: usize,
+
+    // Upper exclusive bound next match MUST satisfy
+    next_match_bound: usize,
+    // First time the associated expression matches successfully
+    // field `next_match_bound` is set match end index
+    // Each time, including first, the associated expression successful matches,
+    // field `next_match_bound` is, if positive, decremented by 1
+    // Then next match of the associated expressoin must never exceed
+    // index `next_match_bound`
+}
+
 // Coordinator of the matching process
 #[allow(dead_code)]
 pub struct Matcher {
@@ -32,9 +56,20 @@ pub struct Matcher {
     target: Vec<char>,
     // Where to start matching
     current: usize,
-    // True if Matcher produces an empty string match in index `current`
+    // True if Matcher generated an empty string match in current position
     // False otherwise
     matched_empty_string: bool,
+
+    // The last item in this Vec represent the index of current pattern among its siblings in
+    // current syntax tree level
+    // All other items represent the index of its parents amongs their siblings with the same
+    // syntax tree level
+    pattern_index_sequence: Vec<usize>,
+    // Of course, root pattern (currently processed pattern) will have Vec
+    // of one 0usize item, because root has no parent and its the zeroth child in its level
+
+    // Backtrack info for currently processed pattern
+    backtrack_info: Vec<ExpressionBacktrackInfo>,
 }
 
 impl Matcher {
@@ -45,11 +80,15 @@ impl Matcher {
         let target = target.chars().collect();
         let current = 0;
         let matched_empty_string = false;
+        let pattern_index_sequence = vec![0];
+        let backtrack_info = vec![];
         Ok(Matcher {
             pattern,
             target,
             current,
             matched_empty_string,
+            pattern_index_sequence,
+            backtrack_info,
         })
     }
 
@@ -103,6 +142,8 @@ impl Matcher {
     pub fn assign_match_target(&mut self, target: &str) {
         self.target = target.chars().collect();
         self.set_position(0);
+        self.pattern_index_sequence.clear();
+        self.backtrack_info.clear();
     }
 
     // Find the next match (non-overlapping with previous match)
