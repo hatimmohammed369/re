@@ -3,24 +3,7 @@
 use crate::parser::{parse, syntax_tree::*};
 
 // Match operation outcome
-#[derive(Debug)]
-pub struct Match {
-    // Matched region of original target string
-    // It's the string beginning in index `begin`
-    // up to but excluding index `end`
-    // For instance:
-    // if begin = end = 10, then `slice` is empty
-    // if begin = 0 and end = 4, then `slice` is string of characters
-    // target[0], target[1], target[2] and target[3]
-    slice: String,
-    // Use a owned string so that Match objects
-    // can be used independently of Matcher
-    // and also Matcher internally stores its matching target
-    // as a Vec<char> because String does NOT allow direct index
-    // which Mathcer needs a lot
-    begin: usize, // begin index relative to original target string
-    end: usize,   // end index (exclusive) relative to original target string
-}
+pub type Match = std::ops::Range<usize>;
 
 #[allow(dead_code)]
 // Backtracking information of a single expression
@@ -156,7 +139,7 @@ impl Matcher {
                 }
             } else {
                 // Return matched region
-                if match_attempt.as_ref().unwrap().slice.is_empty() {
+                if match_attempt.as_ref().unwrap().is_empty() {
                     // Matched the empty string in current position
                     // Matcher MUST advance or it will loop endlessly
                     // matching the empty string at the same position
@@ -211,10 +194,10 @@ impl Matcher {
                 // logical negation of: Matched trailing empty string
                 // which is (self.matched_empty_string && !self.has_next())
                 self.matched_empty_string = true;
-                let slice = String::new();
-                let begin = self.current;
-                let end = self.current;
-                Some(Match { slice, begin, end })
+                Some(Match {
+                    start: self.current,
+                    end: self.current,
+                })
             } else {
                 // Matched trailing empty string
                 // Target string is completely consumed
@@ -254,27 +237,23 @@ impl Matcher {
 
                         // Remember, `x?` is greedy
                         // Match a single x
-                        let slice = String::from(value);
-                        let begin = self.current;
+                        let start = self.current;
                         // Make next search start further in `target`
                         self.advance();
                         let end = self.current;
-                        Some(Match { slice, begin, end })
+                        Some(Match { start, end })
                     }
                     Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
                         // Matching expressions `x*` and `x+`
 
                         // Match as many x's as possible
-                        let begin = self.current;
-                        let mut slice = String::with_capacity(self.target.len() - self.current + 1);
+                        let start = self.current;
                         while self.has_next() && self.target[self.current] == value {
                             self.advance();
-                            slice.push(value);
                         }
-                        slice.shrink_to_fit();
                         let end = self.current;
 
-                        Some(Match { slice, begin, end })
+                        Some(Match { start, end })
                     }
                 }
             }
@@ -311,22 +290,20 @@ impl Matcher {
 
                         // Remember, `.?` is greedy
                         // Consume one character
-                        let slice = String::from(self.target[self.current]);
-                        let begin = self.current;
+                        let start = self.current;
                         // Make next search start further in `target`
                         self.advance();
                         let end = self.current;
-                        Some(Match { slice, begin, end })
+                        Some(Match { start, end })
                     }
                     Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
                         // Matching expressions `.*` and `.+`
 
                         // Consume all remaining characters
-                        let begin = self.current;
+                        let start = self.current;
                         self.set_position(self.target.len());
                         let end = self.current;
-                        let slice = self.target[begin..].iter().collect::<String>();
-                        Some(Match { slice, begin, end })
+                        Some(Match { start, end })
                     }
                 }
             }
@@ -357,12 +334,9 @@ impl Matcher {
 
                         // Matching (E)* and (E)+
                         _ => {
-                            let mut match_end = self.current;
                             while let Some(new_match) = self.compute_match() {
-                                match_end = new_match.end;
+                                match_object.end = new_match.end;
                             }
-                            match_object.slice =
-                                self.target[match_object.begin..match_end].iter().collect();
                             Some(match_object)
                         }
                     }
@@ -465,8 +439,7 @@ impl Matcher {
 
             // Concatenation expression match computation ends
             Some(Match {
-                slice: self.target[old_position..match_region_end].iter().collect(),
-                begin: old_position,
+                start: old_position,
                 end: match_region_end,
             })
         };
