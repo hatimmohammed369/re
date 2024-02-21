@@ -6,23 +6,27 @@ use crate::parser::{parse, syntax_tree::*};
 pub type Match = std::ops::Range<usize>;
 
 #[allow(dead_code)]
-// Backtracking information of a single expression
-// Objects of this struct is used when an expression
-// performs more than one backtrack
+// If an expression E can backtrack (like a+)
+// then each time it successfully matches a range
+// record that range such that if it needs to backtrack
+// Matcher can use its last record range to force it
+// to match a smaller range
 struct ExpressionBacktrackInfo {
-    // The last item in this Vec represent the index of current pattern among its siblings in
-    // current syntax tree level
-    // All other items represent the index of its parents amongs their siblings with the same
-    // syntax tree level
+    // The last item in this Vec represent the index of current pattern among its siblings
+    // within its level in parsed pattern syntax tree
+    // All other items represent the index of its parents among their siblings within
+    // the their respective parsed pattern syntax tree level
     index_sequence: Vec<usize>,
 
     // Position of first successful match of the associated expression
+    // This field is never mutated once set
     first_match_begin: usize,
 
     // Upper exclusive bound next match MUST satisfy
     next_match_bound: usize,
     // First time the associated expression matches successfully
-    // field `next_match_bound` is set match end index
+    // field `next_match_bound` is set to that successful match end index
+
     // Each time, including first, the associated expression successful matches,
     // field `next_match_bound` is, if positive, decremented by 1
     // Then next match of the associated expressoin must never exceed
@@ -48,11 +52,15 @@ pub struct Matcher {
     pattern_index_sequence: Vec<usize>,
     // Of course, root pattern (currently processed pattern) will have Vec
     // of one 0usize item, because root has no parent and its the zeroth child in its level
+    // For instance, a value of X = vec![0, 3, 4] means that currently processed pattern (subexpression)
+    // is the fourth (X[2]) child within its level
+    // its parent is the third(X[1]) child within the level above
+    // its grandparent is the root (X[0])
 
-    // Backtrack info for currently processed pattern
+    // Backtrack info of all subexpressions which can backtrack
     backtrack_info: Vec<ExpressionBacktrackInfo>,
 
-    // If Some(K) then next performed match must never exceed index K
+    // If it's Some(K) then next performed match must never exceed index K
     backtrack_bound: Option<usize>,
 }
 
@@ -164,6 +172,10 @@ impl Matcher {
     }
 
     fn supports_backtracking(expr: &Regexp) -> bool {
+        // An arbitrary expression E supports backtracking if:
+        // 1 - It's quantified, in other words it's preceeding a quantifier (like .*)
+        // 2 - At least one of its children supports backtracking (like (a+|c) because a+ can backtrack)
+
         match &expr.tag {
             ExpressionTag::Group { quantifier } => {
                 // The group itself is quantified or the grouped expression
@@ -188,6 +200,7 @@ impl Matcher {
         }
     }
 
+    // ALL EXPRESSIONS MUST RESTORE OLD POSITION WHEN FAILING TO MATCH
     fn compute_match(&mut self) -> Option<Match> {
         let computed_match = match self.pattern.tag.clone() {
             ExpressionTag::EmptyExpression => self.empty_expression_match(),
@@ -201,20 +214,35 @@ impl Matcher {
         };
 
         // Destroy last used bound
+        // BUT WHY?
+        // If last match is successful, then it makes no sense to make next expression
+        // backtrack making current one backtrack again (loop)
+
+        // If last match failed, then we search for previous siblings of current expression
+        // which can backtrack and hence we need a new backtrack bound
         self.backtrack_bound = None;
 
+        // If current expression successfully matched AND
+        // It can backtrack (like .?) AND
+        // It's not root expression (it makes no sense to have root expression request a backtrack, it has no siblings)
         if computed_match.is_some()
             && Self::supports_backtracking(&self.pattern)
             // Root expression does not backtrack
             && self.pattern.parent.is_some()
         {
+            // THEN
             // Record first match info for later use when backtracking
 
+            // Attempt to find current expression info entry
             let search_index = self.backtrack_info.binary_search_by(|info_entry| {
                 info_entry.index_sequence.cmp(&self.pattern_index_sequence)
             });
             match search_index {
                 Ok(item_index) => {
+                    // Found entry
+                    // Decrement `next_match_bound` to force it to
+                    // match a smaller range next time (when it backtracks)
+
                     let expr_info = &mut self.backtrack_info[item_index];
                     let bound = &mut expr_info.next_match_bound;
                     // Decrement only if positive
@@ -222,7 +250,9 @@ impl Matcher {
                 }
                 Err(insertion_index) => {
                     // This expression never matched before
-                    // Insert a new info entry while maintaining order
+                    // Insert a new info entry while maintaining order all entries
+                    // Entries (ExpressionBacktrackInfo objects) are sorted by field 'index_sequence'
+
                     let mut end = computed_match.as_ref().unwrap().end;
                     // Decrement only if positive
                     end = end.saturating_sub(1);
@@ -256,9 +286,22 @@ impl Matcher {
         *self.pattern_index_sequence.last_mut().unwrap() += 1;
     }
 
+    // EMPTY EXPRESSIONS:
+    // "" `an empty pattern string`
+    // ()
+    // ...(|...)... `between ( and |`
+    // ...(...|)... `between | and )`
+    // |... `before the leading |`
+    // ...| `after the trailing |`
+    // ...||... `between the two |`
+
+    // HOW TO MATCH AN EMPTY STRING EXPRESSION:
     // Match current position in `target` against the empty regular expression
     // this function always succeeds, returning Some(Match)
     // because the empty string always matches even inside another empty string
+    // There is only one case when this function fails (return None)
+    // it's when Matcher matched the trailing empty string (empty string after the last valid index)
+    // it makes sense to stop there or Matcher would endlessly match that trailing empty string
     fn empty_expression_match(&mut self) -> Option<Match> {
         if !self.matched_empty_string || self.has_next() {
             // Not matched empty string here or not all characters processed
@@ -277,8 +320,16 @@ impl Matcher {
         }
     }
 
-    // Match character `value` in current position
-    // If Matcher reached end or current character is not `value` fail (return Option::None)
+    // CHARACTER EXPRESSIONS:
+    // x \ x? \ x* \ x+
+    // x is a single character
+    // Also, x is not a metacharacter or it's an escaped metacharacter
+    // metacharacters are defined in file `grammar`
+    // for instance, k+ is a character expression
+
+    // HOW TO MATCH A CHARACTER EXPRESSION:
+    // Consume the longest (bounded above, if Matcher is backtracking) sequence of contiguous characters `value`
+    // When target is consumed, return None indicating failure
     fn character_expression_match(&mut self, value: char, quantifier: Quantifier) -> Option<Match> {
         if !self.has_next() || self.target[self.current] != value {
             // No more characters to match or current character is not `x`
@@ -293,22 +344,37 @@ impl Matcher {
             // There is at least one unmatched `x`
             match self.backtrack_bound {
                 Some(bound) => {
+                    // Current match is bounded (a backtrack match)
+                    // It starts from self.current (ExpressionBacktrackInfo field `first_match_begin`)
+                    // Current match MUST never exceed a certain index
                     match quantifier {
                         Quantifier::None => {
+                            // Expression `x` was mistakenly classified as a backtracking expression
+                            // Or, last used backtrack_bound was not destroyed
                             eprintln!("FATAL ERROR:");
                             eprintln!("Expression `{value}` was classified as backtracking!");
                             panic!();
                         }
                         Quantifier::OneOrMore if bound == self.current => {
-                            // Expression `x+` can not match when starting and ending before current index
+                            // Expression `x+` can not generate match starting and ending
+                            // at the same index (name self.current)
+                            // For instance:
+                            // If `x+` matched exactly one `x` then its backtrack info is range 4..5
+                            // its ExpressionBacktrackInfo has value 4 in field 'first_match_begin'
+                            // and value 4 in field `next_match_bound`
+                            // (it's 5-1, decremented after the match in function compute_match)
+                            // Thus next time it must make a match starting and ending at index 4
+                            // Which is the empty string, but `x+` must match at least one `x`
+                            // And now it can only match the empty string, IT FAILED
                             None
                         }
                         Quantifier::ZeroOrOne | Quantifier::ZeroOrMore if bound == self.current => {
-                            // Expressions `x?` and `x*` match empty string before current index
+                            // Expressions `x?` and `x*` match empty string between
+                            // self.current (first_match_begin) and self.current (next_match_bound)
                             self.empty_expression_match()
                         }
                         _ => {
-                            // Match as many x's as possible but never exceed backtrack bound
+                            // Match as many x's as possible but never exceed backtrack bound (next_match_bound)
                             let start = self.current;
                             while self.current <= bound && self.target[self.current] == value {
                                 self.advance();
@@ -320,6 +386,8 @@ impl Matcher {
                     }
                 }
                 None => {
+                    // Current match is NOT bounded
+                    // Consume as much characters as possible
                     match quantifier {
                         Quantifier::None | Quantifier::ZeroOrOne => {
                             // Matching expressions `x` and `x?`
@@ -335,6 +403,7 @@ impl Matcher {
                         Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
                             // Matching expressions `x*` and `x+`
 
+                            // Remember, `x*` and `x+` are greedy
                             // Match as many x's as possible
                             let start = self.current;
                             while self.has_next() && self.target[self.current] == value {
@@ -350,8 +419,13 @@ impl Matcher {
         }
     }
 
-    // Match current position in `target` against any character
-    // Return None indicating failure
+    // DOT EXPRESSIONS:
+    // . \ .? \ .* \ .+
+    // Use a literal dot
+
+    // HOW TO MATCH A DOT EXPRESSION:
+    // Consume the longest (bounded above, if Matcher is backtracking) sequence of characters
+    // When target is consumed, return None indicating failure
     fn dot_expression_match(&mut self, quantifier: Quantifier) -> Option<Match> {
         if !self.has_next() {
             // No more characters to match
@@ -379,6 +453,7 @@ impl Matcher {
                 Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
                     // Matching expressions `.*` and `.+`
 
+                    // Remember, `.*` and `.+` are greedy
                     // Consume all remaining characters
                     let start = self.current;
                     self.set_position(self.target.len());
@@ -389,6 +464,13 @@ impl Matcher {
         }
     }
 
+    // GROUP/GROUPED EXPRESSIONS:
+    // (E) where E is also an expression
+    // for instance, (a+|b) is group/grouped expression
+
+    // HOW TO MATCH GROUPED EXPRESSION:
+    // Match whatever grouped expression matched
+    // and then apply the quantifiers after the group itself
     fn group_match(&mut self, quantifier: Quantifier) -> Option<Match> {
         // Start tracking your children
         self.dive();
@@ -409,7 +491,7 @@ impl Matcher {
 
                         // Matching (E)* and (E)+
                         _ => {
-                            // Consume as many E's as possible
+                            // Make expression E match as much as possible
                             while let Some(new_match) = self.compute_match() {
                                 match_object.end = new_match.end;
                             }
@@ -432,6 +514,7 @@ impl Matcher {
             // Grouped expression computation ends
         };
 
+        // Restore parent pattern to process remaining siblings of current pattern
         self.pattern = old_pattern;
         // Abandon your children
         self.bubble_up();
@@ -439,6 +522,13 @@ impl Matcher {
         grouped_expression_mactch
     }
 
+    // ALTERNATION EXPRESSIONS:
+    // (E1|E2|...|E_n) where E1,E2,...,E_n are also expressions
+    // for instance, a|b.c|x is an alternation expression
+
+    // HOW TO MATCH AN ALTERNATION EXPRESSION:
+    // Match children in order from first to last
+    // return the match of the first matching child
     fn alternation_match(&mut self) -> Option<Match> {
         // Start tracking your children
         self.dive();
@@ -449,7 +539,8 @@ impl Matcher {
         let alternation_match = {
             // Match an alternation expression
 
-            let children = old_pattern
+            let children = self
+                .pattern
                 .children
                 .borrow()
                 .iter()
@@ -460,9 +551,14 @@ impl Matcher {
                 self.pattern = child;
                 child_match = self.compute_match();
                 if child_match.is_none() {
+                    // Return to original position this alternation expression started at
+                    // to make all its children start matching from the same position
                     self.set_position(old_position);
+                    // If last child failed to match, the above call
+                    // automatically restores old position where this alternation started matching
                 } else {
                     // One of the branches matched
+                    // The whole alternation expression has matched
                     // Return its match
                     break;
                 }
@@ -474,6 +570,7 @@ impl Matcher {
             child_match
         };
 
+        // Restore parent pattern to process remaining siblings of current pattern
         self.pattern = old_pattern;
         // Abandon your children
         self.bubble_up();
@@ -481,6 +578,15 @@ impl Matcher {
         alternation_match
     }
 
+    // CONCATENATION EXPRESSIONS:
+    // E1E2...E_n, where E1, E2, ..., E_n are also expressions
+    // for instance, a.(a+|b*)c* is a concatenation expression with
+    // E1 = a, E2 = ., E3 = (a+|b*), E4 = c*
+
+    // HOW TO MATCH A CONCATENATION EXPRESSION:
+    // If at least one child fails, then the whole expression fails too
+    // Otherwise return the range starting from first child match
+    // and ending with last child match
     fn concatenation_match(&mut self) -> Option<Match> {
         // Start tracking your children
         self.dive();
@@ -491,13 +597,15 @@ impl Matcher {
         let concatenation_match = {
             // Match a concatenation expression
 
-            let mut backtracking_siblings_positions = Vec::<usize>::new();
-            let children = old_pattern
+            let children = self
+                .pattern
                 .children
                 .borrow()
                 .iter()
                 .map(|rc| rc.borrow().clone())
                 .collect::<Vec<_>>();
+            // Positions (indices) of children supporting backtrack in Vec `children`
+            let mut backtracking_siblings_positions = Vec::<usize>::new();
             let mut match_region_end = self.current;
             let mut child_index = 0usize;
             while child_index < children.len() {
@@ -544,8 +652,9 @@ impl Matcher {
                                 // An item failed to match and none of its
                                 // preceeding siblings can backtrack
                                 // The whole concatenation expression fails
-                                // Restore old position and old pattern
+                                // Restore parent pattern to process remaining siblings of current pattern
                                 self.pattern = old_pattern;
+                                // Restore old position
                                 self.set_position(old_position);
                                 // Abandon your children
                                 self.bubble_up();
