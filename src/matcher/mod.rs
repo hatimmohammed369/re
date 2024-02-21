@@ -61,7 +61,7 @@ impl Matcher {
         let target = target.chars().collect();
         let current = 0;
         let matched_empty_string = false;
-        let pattern_index_sequence = vec![0];
+        let pattern_index_sequence = vec![];
         let backtrack_info = vec![];
         Ok(Matcher {
             pattern,
@@ -118,11 +118,13 @@ impl Matcher {
 
     // Find the next match (non-overlapping with previous match)
     pub fn find_match(&mut self) -> Option<Match> {
+        // Track root expression
+        self.dive();
+
         // WHY WE NEED A LOOP?
         // Because first match in target string may not be index 0
         // and hence we need to keep matching until we hit the first match
         // or reach end of target
-
         let mut match_attempt;
         loop {
             match_attempt = self.compute_match();
@@ -149,11 +151,40 @@ impl Matcher {
                 break;
             }
         }
+
+        // Abandon root expression
+        self.bubble_up();
+
         match_attempt
     }
 
+    fn supports_backtracking(expr: &Regexp) -> bool {
+        match &expr.tag {
+            ExpressionTag::Group { quantifier } => {
+                // The group itself is quantified or the grouped expression
+                // inside supports backtracking
+                !matches!(quantifier, Quantifier::None)
+                    || Self::supports_backtracking(&expr.children.borrow()[0].borrow())
+            }
+            ExpressionTag::CharacterExpression { quantifier, .. }
+            | ExpressionTag::DotExpression { quantifier } => {
+                // . or x are quantified
+                !matches!(quantifier, Quantifier::None)
+            }
+
+            // Alternation and concatenation
+            _ => {
+                // At least one child supports backtracking
+                expr.children
+                    .borrow()
+                    .iter()
+                    .any(|child| Self::supports_backtracking(&child.borrow()))
+            }
+        }
+    }
+
     fn compute_match(&mut self) -> Option<Match> {
-        match self.pattern.tag.clone() {
+        let computed_match = match self.pattern.tag.clone() {
             ExpressionTag::EmptyExpression => self.empty_expression_match(),
             ExpressionTag::CharacterExpression { value, quantifier } => {
                 self.character_expression_match(value, quantifier)
@@ -162,7 +193,37 @@ impl Matcher {
             ExpressionTag::Group { quantifier } => self.group_match(quantifier),
             ExpressionTag::Alternation => self.alternation_match(),
             ExpressionTag::Concatenation => self.concatenation_match(),
+        };
+
+        if computed_match.is_some() && Self::supports_backtracking(&self.pattern) {
+            // Record first match info for later use when backtracking
+            let mut info_entry = None;
+            for info_item in &mut self.backtrack_info {
+                if info_item.index_sequence == self.pattern_index_sequence {
+                    info_entry = Some(info_item);
+                    break;
+                }
+            }
+
+            match info_entry {
+                Some(expr_info) => {
+                    let bound = &mut expr_info.next_match_bound;
+                    // Decrement only if positive
+                    *bound = bound.saturating_sub(1);
+                }
+                None => {
+                    // This expression never matched before
+                    // Add a new info entry
+                    self.backtrack_info.push(ExpressionBacktrackInfo {
+                        index_sequence: self.pattern_index_sequence.clone(),
+                        first_match_begin: computed_match.as_ref().unwrap().start,
+                        next_match_bound: computed_match.as_ref().unwrap().end,
+                    })
+                }
+            }
         }
+
+        computed_match
     }
 
     fn dive(&mut self) {
@@ -184,138 +245,106 @@ impl Matcher {
     // this function always succeeds, returning Some(Match)
     // because the empty string always matches even inside another empty string
     fn empty_expression_match(&mut self) -> Option<Match> {
-        self.dive();
-
-        let empty_string_match = {
-            // Match an empty string
-
-            if !self.matched_empty_string || self.has_next() {
-                // Not matched empty string here or not all characters processed
-                // logical negation of: Matched trailing empty string
-                // which is (self.matched_empty_string && !self.has_next())
-                self.matched_empty_string = true;
-                Some(Match {
-                    start: self.current,
-                    end: self.current,
-                })
-            } else {
-                // Matched trailing empty string
-                // Target string is completely consumed
-                // NO MORE MATCHES FOR THIS TARGET
-                None
-            }
-
-            // Empty string match computation ends
-        };
-
-        self.bubble_up();
-        empty_string_match
+        if !self.matched_empty_string || self.has_next() {
+            // Not matched empty string here or not all characters processed
+            // logical negation of: Matched trailing empty string
+            // which is (self.matched_empty_string && !self.has_next())
+            self.matched_empty_string = true;
+            Some(Match {
+                start: self.current,
+                end: self.current,
+            })
+        } else {
+            // Matched trailing empty string
+            // Target string is completely consumed
+            // NO MORE MATCHES FOR THIS TARGET
+            None
+        }
     }
 
     // Match character `value` in current position
     // If Matcher reached end or current character is not `value` fail (return Option::None)
     fn character_expression_match(&mut self, value: char, quantifier: Quantifier) -> Option<Match> {
-        self.dive();
+        if !self.has_next() || self.target[self.current] != value {
+            // No more characters to match or current character is not `x`
+            match quantifier {
+                // Matching `x` or `x+` at end fails
+                Quantifier::None | Quantifier::OneOrMore => None,
 
-        let character_expression_match = {
-            // Match a character expression
+                // Expressions `x?` and `x*` at end match the empty string
+                _ => self.empty_expression_match(),
+            }
+        } else {
+            // There is at least one unmatched `x`
+            match quantifier {
+                Quantifier::None | Quantifier::ZeroOrOne => {
+                    // Matching expressions `x` and `x?`
 
-            if !self.has_next() || self.target[self.current] != value {
-                // No more characters to match or current character is not `x`
-                match quantifier {
-                    // Matching `x` or `x+` at end fails
-                    Quantifier::None | Quantifier::OneOrMore => None,
-
-                    // Expressions `x?` and `x*` at end match the empty string
-                    _ => self.empty_expression_match(),
+                    // Remember, `x?` is greedy
+                    // Match a single x
+                    let start = self.current;
+                    // Make next search start further in `target`
+                    self.advance();
+                    let end = self.current;
+                    Some(Match { start, end })
                 }
-            } else {
-                // There is at least one unmatched `x`
-                match quantifier {
-                    Quantifier::None | Quantifier::ZeroOrOne => {
-                        // Matching expressions `x` and `x?`
+                Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
+                    // Matching expressions `x*` and `x+`
 
-                        // Remember, `x?` is greedy
-                        // Match a single x
-                        let start = self.current;
-                        // Make next search start further in `target`
+                    // Match as many x's as possible
+                    let start = self.current;
+                    while self.has_next() && self.target[self.current] == value {
                         self.advance();
-                        let end = self.current;
-                        Some(Match { start, end })
                     }
-                    Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
-                        // Matching expressions `x*` and `x+`
+                    let end = self.current;
 
-                        // Match as many x's as possible
-                        let start = self.current;
-                        while self.has_next() && self.target[self.current] == value {
-                            self.advance();
-                        }
-                        let end = self.current;
-
-                        Some(Match { start, end })
-                    }
+                    Some(Match { start, end })
                 }
             }
-
-            // Character expression match computation ends
-        };
-
-        self.bubble_up();
-        character_expression_match
+        }
     }
 
     // Match current position in `target` against any character
     // Return None indicating failure
     fn dot_expression_match(&mut self, quantifier: Quantifier) -> Option<Match> {
-        self.dive();
+        if !self.has_next() {
+            // No more characters to match
+            match quantifier {
+                // Matching `.` or `.+` at end fails
+                Quantifier::None | Quantifier::OneOrMore => Option::None,
 
-        let dot_expression_match = {
-            // Match a dot expression
+                // Expressions `.?` and `.*` at end match the empty string
+                _ => self.empty_expression_match(),
+            }
+        } else {
+            // There is at least one unmatched character
+            match quantifier {
+                Quantifier::None | Quantifier::ZeroOrOne => {
+                    // Matching expressions `.` and `.?`
 
-            if !self.has_next() {
-                // No more characters to match
-                match quantifier {
-                    // Matching `.` or `.+` at end fails
-                    Quantifier::None | Quantifier::OneOrMore => Option::None,
-
-                    // Expressions `.?` and `.*` at end match the empty string
-                    _ => self.empty_expression_match(),
+                    // Remember, `.?` is greedy
+                    // Consume one character
+                    let start = self.current;
+                    // Make next search start further in `target`
+                    self.advance();
+                    let end = self.current;
+                    Some(Match { start, end })
                 }
-            } else {
-                // There is at least one unmatched character
-                match quantifier {
-                    Quantifier::None | Quantifier::ZeroOrOne => {
-                        // Matching expressions `.` and `.?`
+                Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
+                    // Matching expressions `.*` and `.+`
 
-                        // Remember, `.?` is greedy
-                        // Consume one character
-                        let start = self.current;
-                        // Make next search start further in `target`
-                        self.advance();
-                        let end = self.current;
-                        Some(Match { start, end })
-                    }
-                    Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
-                        // Matching expressions `.*` and `.+`
-
-                        // Consume all remaining characters
-                        let start = self.current;
-                        self.set_position(self.target.len());
-                        let end = self.current;
-                        Some(Match { start, end })
-                    }
+                    // Consume all remaining characters
+                    let start = self.current;
+                    self.set_position(self.target.len());
+                    let end = self.current;
+                    Some(Match { start, end })
                 }
             }
-
-            // Dot expression match computation ends
-        };
-
-        self.bubble_up();
-        dot_expression_match
+        }
     }
 
     fn group_match(&mut self, quantifier: Quantifier) -> Option<Match> {
+        // Start tracking your children
         self.dive();
 
         let old_pattern = self.pattern.clone();
@@ -334,6 +363,7 @@ impl Matcher {
 
                         // Matching (E)* and (E)+
                         _ => {
+                            // Consume as many E's as possible
                             while let Some(new_match) = self.compute_match() {
                                 match_object.end = new_match.end;
                             }
@@ -357,37 +387,41 @@ impl Matcher {
         };
 
         self.pattern = old_pattern;
+        // Abandon your children
         self.bubble_up();
+
         grouped_expression_mactch
     }
 
     fn alternation_match(&mut self) -> Option<Match> {
+        // Start tracking your children
         self.dive();
 
+        let old_position = self.current;
         let old_pattern = self.pattern.clone();
 
         let alternation_match = {
             // Match an alternation expression
 
-            let old_position = self.current;
-            let mut child_match = None;
             let children = old_pattern
                 .children
                 .borrow()
                 .iter()
                 .map(|rc| rc.borrow().clone())
                 .collect::<Vec<_>>();
+            let mut child_match = None;
             for child in children {
-                self.appoint_next_child();
                 self.pattern = child;
                 child_match = self.compute_match();
                 if child_match.is_none() {
                     self.set_position(old_position);
                 } else {
-                    // One are of the branches matched
+                    // One of the branches matched
                     // Return its match
                     break;
                 }
+                // Start tracking next child
+                self.appoint_next_child();
             }
 
             // Alternation expression match computation ends
@@ -395,16 +429,21 @@ impl Matcher {
         };
 
         self.pattern = old_pattern;
+        // Abandon your children
         self.bubble_up();
+
         alternation_match
     }
 
     fn concatenation_match(&mut self) -> Option<Match> {
+        // Start tracking your children
+        self.dive();
+
+        let old_position = self.current;
         let old_pattern = self.pattern.clone();
 
         let concatenation_match = {
             // Match a concatenation expression
-            let old_position = self.current;
 
             let children = old_pattern
                 .children
@@ -412,11 +451,9 @@ impl Matcher {
                 .iter()
                 .map(|rc| rc.borrow().clone())
                 .collect::<Vec<_>>();
-
             let mut match_region_end = self.current;
             for child in children {
                 self.pattern = child;
-                self.appoint_next_child();
                 match self.compute_match() {
                     Some(match_obj) => {
                         // If this expression matched, then its match begins
@@ -432,9 +469,13 @@ impl Matcher {
                         // Restore old position and old pattern
                         self.pattern = old_pattern;
                         self.set_position(old_position);
+                        // Abandon your children
+                        self.bubble_up();
                         return None;
                     }
                 }
+                // Start tracking next child
+                self.appoint_next_child();
             }
 
             // Concatenation expression match computation ends
@@ -445,7 +486,9 @@ impl Matcher {
         };
 
         self.pattern = old_pattern.clone();
+        // Abandon your children
         self.bubble_up();
+
         concatenation_match
     }
 }
