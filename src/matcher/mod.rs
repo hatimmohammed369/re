@@ -51,6 +51,9 @@ pub struct Matcher {
 
     // Backtrack info for currently processed pattern
     backtrack_info: Vec<ExpressionBacktrackInfo>,
+
+    // If Some(K) then next performed match must never exceed index K
+    backtrack_bound: Option<usize>,
 }
 
 impl Matcher {
@@ -63,6 +66,7 @@ impl Matcher {
         let matched_empty_string = false;
         let pattern_index_sequence = vec![];
         let backtrack_info = vec![];
+        let backtrack_bound = None;
         Ok(Matcher {
             pattern,
             target,
@@ -70,6 +74,7 @@ impl Matcher {
             matched_empty_string,
             pattern_index_sequence,
             backtrack_info,
+            backtrack_bound,
         })
     }
 
@@ -195,30 +200,40 @@ impl Matcher {
             ExpressionTag::Concatenation => self.concatenation_match(),
         };
 
-        if computed_match.is_some() && Self::supports_backtracking(&self.pattern) {
-            // Record first match info for later use when backtracking
-            let mut info_entry = None;
-            for info_item in &mut self.backtrack_info {
-                if info_item.index_sequence == self.pattern_index_sequence {
-                    info_entry = Some(info_item);
-                    break;
-                }
-            }
+        // Destroy last used bound
+        self.backtrack_bound = None;
 
-            match info_entry {
-                Some(expr_info) => {
+        if computed_match.is_some()
+            && Self::supports_backtracking(&self.pattern)
+            // Root expression does not backtrack
+            && self.pattern.parent.is_some()
+        {
+            // Record first match info for later use when backtracking
+
+            let search_index = self.backtrack_info.binary_search_by(|info_entry| {
+                info_entry.index_sequence.cmp(&self.pattern_index_sequence)
+            });
+            match search_index {
+                Ok(item_index) => {
+                    let expr_info = &mut self.backtrack_info[item_index];
                     let bound = &mut expr_info.next_match_bound;
                     // Decrement only if positive
                     *bound = bound.saturating_sub(1);
                 }
-                None => {
+                Err(insertion_index) => {
                     // This expression never matched before
-                    // Add a new info entry
-                    self.backtrack_info.push(ExpressionBacktrackInfo {
-                        index_sequence: self.pattern_index_sequence.clone(),
-                        first_match_begin: computed_match.as_ref().unwrap().start,
-                        next_match_bound: computed_match.as_ref().unwrap().end,
-                    })
+                    // Insert a new info entry while maintaining order
+                    let mut end = computed_match.as_ref().unwrap().end;
+                    // Decrement only if positive
+                    end = end.saturating_sub(1);
+                    self.backtrack_info.insert(
+                        insertion_index,
+                        ExpressionBacktrackInfo {
+                            index_sequence: self.pattern_index_sequence.clone(),
+                            first_match_begin: computed_match.as_ref().unwrap().start,
+                            next_match_bound: end,
+                        },
+                    )
                 }
             }
         }
@@ -445,6 +460,7 @@ impl Matcher {
         let concatenation_match = {
             // Match a concatenation expression
 
+            let mut backtracking_siblings_positions = Vec::<usize>::new();
             let children = old_pattern
                 .children
                 .borrow()
@@ -452,8 +468,11 @@ impl Matcher {
                 .map(|rc| rc.borrow().clone())
                 .collect::<Vec<_>>();
             let mut match_region_end = self.current;
-            for child in children {
-                self.pattern = child;
+            let mut child_index = 0usize;
+            while child_index < children.len() {
+                let child = &children[child_index];
+                self.pattern = child.clone();
+
                 match self.compute_match() {
                     Some(match_obj) => {
                         // If this expression matched, then its match begins
@@ -462,18 +481,50 @@ impl Matcher {
                         // is never incremented before doing the actual matching
                         // but it's incremented after a successful match
                         match_region_end = match_obj.end;
+                        if Self::supports_backtracking(&self.pattern)
+                            && !backtracking_siblings_positions.contains(&child_index)
+                        {
+                            backtracking_siblings_positions.push(child_index);
+                        }
                     }
                     None => {
-                        // An item failed to match
-                        // the whole concatenation expression fails
-                        // Restore old position and old pattern
-                        self.pattern = old_pattern;
-                        self.set_position(old_position);
-                        // Abandon your children
-                        self.bubble_up();
-                        return None;
+                        match backtracking_siblings_positions.last().cloned() {
+                            Some(sibling_index) => {
+                                let (
+                                    sibling_index,
+                                    sibling_first_match_begin,
+                                    sibling_next_match_bound,
+                                ) = {
+                                    let sibling_info = &self.backtrack_info[sibling_index];
+                                    (
+                                        *sibling_info.index_sequence.last().unwrap(),
+                                        sibling_info.first_match_begin,
+                                        sibling_info.next_match_bound,
+                                    )
+                                };
+
+                                child_index = sibling_index;
+                                self.set_position(sibling_first_match_begin);
+                                self.backtrack_bound = Some(sibling_next_match_bound);
+                                *self.pattern_index_sequence.last_mut().unwrap() = child_index;
+                                continue;
+                            }
+                            None => {
+                                // An item failed to match and none of its
+                                // preceeding siblings can backtrack
+                                // The whole concatenation expression fails
+                                // Restore old position and old pattern
+                                self.pattern = old_pattern;
+                                self.set_position(old_position);
+                                // Abandon your children
+                                self.bubble_up();
+                                return None;
+                            }
+                        }
                     }
                 }
+
+                child_index += 1;
                 // Start tracking next child
                 self.appoint_next_child();
             }
