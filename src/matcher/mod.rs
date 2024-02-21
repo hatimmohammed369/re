@@ -291,29 +291,60 @@ impl Matcher {
             }
         } else {
             // There is at least one unmatched `x`
-            match quantifier {
-                Quantifier::None | Quantifier::ZeroOrOne => {
-                    // Matching expressions `x` and `x?`
+            match self.backtrack_bound {
+                Some(bound) => {
+                    match quantifier {
+                        Quantifier::None => {
+                            eprintln!("FATAL ERROR:");
+                            eprintln!("Expression `{value}` was classified as backtracking!");
+                            panic!();
+                        }
+                        Quantifier::OneOrMore if bound == self.current => {
+                            // Expression `x+` can not match when starting and ending before current index
+                            None
+                        }
+                        Quantifier::ZeroOrOne | Quantifier::ZeroOrMore if bound == self.current => {
+                            // Expressions `x?` and `x*` match empty string before current index
+                            self.empty_expression_match()
+                        }
+                        _ => {
+                            // Match as many x's as possible but never exceed backtrack bound
+                            let start = self.current;
+                            while self.current <= bound && self.target[self.current] == value {
+                                self.advance();
+                            }
+                            let end = self.current;
 
-                    // Remember, `x?` is greedy
-                    // Match a single x
-                    let start = self.current;
-                    // Make next search start further in `target`
-                    self.advance();
-                    let end = self.current;
-                    Some(Match { start, end })
-                }
-                Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
-                    // Matching expressions `x*` and `x+`
-
-                    // Match as many x's as possible
-                    let start = self.current;
-                    while self.has_next() && self.target[self.current] == value {
-                        self.advance();
+                            Some(Match { start, end })
+                        }
                     }
-                    let end = self.current;
+                }
+                None => {
+                    match quantifier {
+                        Quantifier::None | Quantifier::ZeroOrOne => {
+                            // Matching expressions `x` and `x?`
 
-                    Some(Match { start, end })
+                            // Remember, `x?` is greedy
+                            // Match a single x
+                            let start = self.current;
+                            // Make next search start further in `target`
+                            self.advance();
+                            let end = self.current;
+                            Some(Match { start, end })
+                        }
+                        Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
+                            // Matching expressions `x*` and `x+`
+
+                            // Match as many x's as possible
+                            let start = self.current;
+                            while self.has_next() && self.target[self.current] == value {
+                                self.advance();
+                            }
+                            let end = self.current;
+
+                            Some(Match { start, end })
+                        }
+                    }
                 }
             }
         }
