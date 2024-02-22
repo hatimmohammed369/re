@@ -379,8 +379,7 @@ impl Matcher {
                 let table_entry = self
                     .backtrack_table
                     .iter()
-                    .filter(|entry| entry.index_sequence == self.pattern_index_sequence)
-                    .next();
+                    .find(|entry| entry.index_sequence == self.pattern_index_sequence);
                 match table_entry {
                     Some(info) => info.next_match_bound,
                     None => {
@@ -616,14 +615,13 @@ impl Matcher {
                         // is never incremented before doing the actual matching
                         // but it's incremented after a successful match
                         match_region_end = match_obj.end;
-                        if Self::supports_backtracking(&self.pattern) {
-                            if !backtracking_siblings_positions // do not list the same sibling twice
+                        if Self::supports_backtracking(&self.pattern)
+                            && !backtracking_siblings_positions // do not list the same sibling twice
                                 .iter()
                                 .any(|(child_idx, _)| *child_idx == child_index)
-                            {
-                                backtracking_siblings_positions
-                                    .push((child_index, self.backtrack_table.len() - 1));
-                            }
+                        {
+                            backtracking_siblings_positions
+                                .push((child_index, self.backtrack_table.len() - 1));
                         }
                     }
                     None => {
