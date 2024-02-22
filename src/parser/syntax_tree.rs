@@ -50,11 +50,14 @@ pub enum ExpressionTag {
     // or around | in string `|` or string `||`
     EmptyExpression,
 
-    // Dot expression `.`
-    DotExpression { quantifier: Quantifier },
-
     // Character expression, like `z`
-    CharacterExpression { value: char, quantifier: Quantifier },
+    CharacterExpression {
+        // If field `value` is Option::<char>::None
+        // then this CharacterExpression expression is actually a dot expression
+        // . \ .? \ .* \ .+
+        value: Option<char>,
+        quantifier: Quantifier,
+    },
 
     // Concatenation expression
     // something like `a.b.c(abc)`
@@ -66,7 +69,9 @@ pub enum ExpressionTag {
 
     // A grouped expression (...)
     // where `...` is another regular expression
-    Group { quantifier: Quantifier },
+    Group {
+        quantifier: Quantifier,
+    },
 }
 
 // (Wrapper) Expression objects after parsing
@@ -115,10 +120,9 @@ impl Regexp {
             ExpressionTag::EmptyExpression => String::new(),
 
             ExpressionTag::CharacterExpression { value, quantifier } => {
+                let value = value.unwrap_or('.');
                 format!("{value}{quantifier}")
             }
-
-            ExpressionTag::DotExpression { quantifier } => format!(".{quantifier}"),
 
             ExpressionTag::Group { quantifier } => {
                 format!(

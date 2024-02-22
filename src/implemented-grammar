@@ -24,6 +24,8 @@ Group => "(" Regexp ")"
 
 Match => MatchCharacter | MatchAnyCharacter
 
+MatchAnyCharacter => Dot
+
 MatchCharacter => Character
 
 Character => OrdinaryCharacter | EscapedMetacharacter

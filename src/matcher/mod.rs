@@ -199,8 +199,7 @@ impl Matcher {
             // It doesn't need backtracking
             ExpressionTag::EmptyExpression => false,
 
-            ExpressionTag::CharacterExpression { quantifier, .. }
-            | ExpressionTag::DotExpression { quantifier } => {
+            ExpressionTag::CharacterExpression { quantifier, .. } => {
                 // . or x are quantified
                 !matches!(quantifier, Quantifier::None)
             }
@@ -230,7 +229,6 @@ impl Matcher {
             ExpressionTag::CharacterExpression { value, quantifier } => {
                 self.character_expression_match(value, quantifier)
             }
-            ExpressionTag::DotExpression { quantifier } => self.dot_expression_match(quantifier),
             ExpressionTag::Group { quantifier } => self.group_match(quantifier),
             ExpressionTag::Alternation => self.alternation_match(),
             ExpressionTag::Concatenation => self.concatenation_match(),
@@ -364,8 +362,12 @@ impl Matcher {
     // HOW TO MATCH A CHARACTER EXPRESSION:
     // Consume the longest (bounded above, if Matcher is backtracking) sequence of contiguous characters `value`
     // When target is consumed, return None indicating failure
-    fn character_expression_match(&mut self, value: char, quantifier: Quantifier) -> Option<Match> {
-        if !self.has_next() || self.target[self.current] != value {
+    fn character_expression_match(
+        &mut self,
+        value: Option<char>,
+        quantifier: Quantifier,
+    ) -> Option<Match> {
+        if !self.has_next() || (value.is_some() && self.target[self.current] != value.unwrap()) {
             // No more characters to match or current character is not `x`
             match quantifier {
                 // Matching `x` or `x+` at end fails
@@ -396,7 +398,9 @@ impl Matcher {
             };
 
             let start = self.current;
-            while self.current < match_bound && self.target[self.current] == value {
+            while self.current < match_bound
+                && !(value.is_some() && self.target[self.current] != value.unwrap())
+            {
                 self.advance();
             }
             let end = self.current;
@@ -409,51 +413,6 @@ impl Matcher {
                 }
             } else {
                 Some(Match { start, end })
-            }
-        }
-    }
-
-    // DOT EXPRESSIONS:
-    // . \ .? \ .* \ .+
-    // Use a literal dot
-
-    // HOW TO MATCH A DOT EXPRESSION:
-    // Consume the longest (bounded above, if Matcher is backtracking) sequence of characters
-    // When target is consumed, return None indicating failure
-    fn dot_expression_match(&mut self, quantifier: Quantifier) -> Option<Match> {
-        if !self.has_next() {
-            // No more characters to match
-            match quantifier {
-                // Matching `.` or `.+` at end fails
-                Quantifier::None | Quantifier::OneOrMore => Option::None,
-
-                // Expressions `.?` and `.*` at end match the empty string
-                _ => self.empty_expression_match(),
-            }
-        } else {
-            // There is at least one unmatched character
-            match quantifier {
-                Quantifier::None | Quantifier::ZeroOrOne => {
-                    // Matching expressions `.` and `.?`
-
-                    // Remember, `.?` is greedy
-                    // Consume one character
-                    let start = self.current;
-                    // Make next search start further in `target`
-                    self.advance();
-                    let end = self.current;
-                    Some(Match { start, end })
-                }
-                Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
-                    // Matching expressions `.*` and `.+`
-
-                    // Remember, `.*` and `.+` are greedy
-                    // Consume all remaining characters
-                    let start = self.current;
-                    self.set_position(self.target.len());
-                    let end = self.current;
-                    Some(Match { start, end })
-                }
             }
         }
     }

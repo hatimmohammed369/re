@@ -368,7 +368,8 @@ impl Parser {
 
         // Successfully parsed a dot expression
         Ok(Some(Rc::new(RefCell::new(Regexp::new(
-            ExpressionTag::DotExpression {
+            ExpressionTag::CharacterExpression {
+                value: None,
                 quantifier: self.consume_quantifier()?,
             },
         )))))
@@ -385,7 +386,7 @@ impl Parser {
         // Successfully parsed a character expression
         Ok(Some(Rc::new(RefCell::new(Regexp::new(
             ExpressionTag::CharacterExpression {
-                value,
+                value: Some(value),
                 quantifier: self.consume_quantifier()?,
             },
         )))))

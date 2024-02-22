@@ -42,6 +42,9 @@ Group => "(" Regexp ")"
 
 Match => MatchCharacter | MatchAnyCharacter
 
+# Dot expression `.` matches any single character
+MatchAnyCharacter => Dot
+
 MatchCharacter => Character
 
 # `Character` is defined to be a `Character token` according to Rust lexical analysis
@@ -89,6 +92,3 @@ Star => "*"
 Dot => "."
 
 Mark => "?"
-
-# Dot expression `.` matches any single character
-MatchAnyCharacter => Dot
