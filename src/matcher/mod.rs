@@ -72,9 +72,6 @@ pub struct Matcher {
 
     // Backtrack info of all subexpressions which can backtrack
     backtrack_table: Vec<ExpressionBacktrackInfo>,
-
-    // Index of active backtrack info in `backtrack_table`
-    backtrack_active_entry_index: Option<usize>,
 }
 
 impl Matcher {
@@ -88,7 +85,6 @@ impl Matcher {
         let matched_empty_string = false;
         let pattern_index_sequence = vec![];
         let backtrack_table = vec![];
-        let backtrack_active_entry_index = None;
         Ok(Matcher {
             pattern,
             target,
@@ -97,7 +93,6 @@ impl Matcher {
             matched_empty_string,
             pattern_index_sequence,
             backtrack_table,
-            backtrack_active_entry_index,
         })
     }
 
@@ -246,10 +241,6 @@ impl Matcher {
         // If last match is successful, then it makes no sense to make next expression
         // backtrack making current one backtrack again (loop)
 
-        // If last match failed, then we search for previous siblings of current expression
-        // which can backtrack and hence we need a new backtrack bound
-        self.backtrack_active_entry_index = None;
-
         // If current expression successfully matched AND
         // It can backtrack (like .?) AND
         // It's not root expression (it makes no sense to have root expression request a backtrack, it has no siblings)
@@ -384,92 +375,41 @@ impl Matcher {
                 _ => self.empty_expression_match(),
             }
         } else {
-            // There is at least one unmatched `x`
-            match self.backtrack_active_entry_index {
-                Some(index) => {
-                    // Current match is bounded (a backtrack match)
-                    // It starts from self.current (ExpressionBacktrackInfo field `first_match_start`)
-                    // Current match MUST never exceed a certain index
-                    let active_entry = &self.backtrack_table[index];
-                    let bound = active_entry.next_match_bound;
-                    if !active_entry.backtracked_to_start {
+            let match_bound = {
+                let table_entry = self
+                    .backtrack_table
+                    .iter()
+                    .filter(|entry| entry.index_sequence == self.pattern_index_sequence)
+                    .next();
+                match table_entry {
+                    Some(info) => info.next_match_bound,
+                    None => {
+                        // This expression NEVER backtracked before
+                        // or it does not support backtracking (like `x`)
                         match quantifier {
-                            Quantifier::None => {
-                                // Expression `x` was mistakenly classified as a backtracking expression
-                                // Or, last used backtrack_active_entry_index was not destroyed
-                                eprintln!("FATAL ERROR:");
-                                eprintln!("Expression `{value}` was classified as backtracking!");
-                                panic!();
-                            }
-                            Quantifier::OneOrMore if bound == self.current => {
-                                // Expression `x+` can not generate match starting and ending
-                                // at the same index (name self.current)
-                                // For instance:
-                                // If `x+` matched exactly one `x` then its backtrack info is range 4..5
-                                // its ExpressionBacktrackInfo has value 4 in field 'first_match_start'
-                                // and value 4 in field `next_match_bound`
-                                // (it's 5-1, decremented after the match in function compute_match)
-                                // Thus next time it must make a match starting and ending at index 4
-                                // Which is the empty string, but `x+` must match at least one `x`
-                                // And now it can only match the empty string, IT FAILED
-                                None
-                            }
-                            Quantifier::ZeroOrOne | Quantifier::ZeroOrMore
-                                if bound == self.current =>
-                            {
-                                // Expressions `x?` and `x*` match empty string between
-                                // self.current (first_match_start) and self.current (next_match_bound)
-                                self.empty_expression_match()
-                            }
-                            _ => {
-                                // Match as many x's as possible but never exceed backtrack bound (next_match_bound)
-                                let start = self.current;
-                                // Never use <=
-                                // index `bound` is not part of the match range
-                                while self.current < bound && self.target[self.current] == value {
-                                    self.advance();
-                                }
-                                let end = self.current;
-
-                                Some(Match { start, end })
-                            }
-                        }
-                    } else {
-                        // This expression expired its chances
-                        // No more backtracking or matching
-                        None
-                    }
-                }
-                None => {
-                    // Current match is NOT bounded
-                    // Consume as much characters as possible
-                    match quantifier {
-                        Quantifier::None | Quantifier::ZeroOrOne => {
-                            // Matching expressions `x` and `x?`
-
-                            // Remember, `x?` is greedy
-                            // Match a single x
-                            let start = self.current;
-                            // Make next search start further in `target`
-                            self.advance();
-                            let end = self.current;
-                            Some(Match { start, end })
-                        }
-                        Quantifier::ZeroOrMore | Quantifier::OneOrMore => {
-                            // Matching expressions `x*` and `x+`
-
-                            // Remember, `x*` and `x+` are greedy
-                            // Match as many x's as possible
-                            let start = self.current;
-                            while self.has_next() && self.target[self.current] == value {
-                                self.advance();
-                            }
-                            let end = self.current;
-
-                            Some(Match { start, end })
+                            // Consume exactly one `x`
+                            Quantifier::None | Quantifier::ZeroOrOne => self.current + 1,
+                            // Consume as many x's as possible
+                            _ => self.target.len(),
                         }
                     }
                 }
+            };
+
+            let start = self.current;
+            while self.current < match_bound && self.target[self.current] == value {
+                self.advance();
+            }
+            let end = self.current;
+
+            if start == end {
+                // Empty range
+                match quantifier {
+                    Quantifier::None | Quantifier::OneOrMore => None,
+                    _ => self.empty_expression_match(),
+                }
+            } else {
+                Some(Match { start, end })
             }
         }
     }
@@ -705,8 +645,6 @@ impl Matcher {
                                 let table_entry = &self.backtrack_table[table_entry_index];
                                 // Restore position when this concatenation began matching
                                 self.set_position(table_entry.first_match_start);
-                                // Point to backtrack entry in table
-                                self.backtrack_active_entry_index = Some(table_entry_index);
                                 // Fix subexpressions index tracker
                                 *self.pattern_index_sequence.last_mut().unwrap() = child_index;
                                 continue;
