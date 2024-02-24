@@ -24,6 +24,8 @@ struct ExpressionBacktrackInfo {
 
     // Upper exclusive bound next match MUST satisfy
     last_match_end: usize,
+
+    backtracked_to_last_match_start: bool,
 }
 
 // Coordinator of the matching process
@@ -257,6 +259,7 @@ impl Matcher {
                     // during the first match and then used repeatedly by other matches
                     expr_info.last_match_start = start;
                     expr_info.last_match_end = end;
+                    expr_info.backtracked_to_last_match_start = start == end;
                 }
                 Err(insertion_index) => {
                     // This expression never matched before
@@ -269,6 +272,9 @@ impl Matcher {
                             index_sequence: self.pattern_index_sequence.clone(),
                             last_match_start: start,
                             last_match_end: end,
+                            backtracked_to_last_match_start: start == end,
+                            // If this subexpression just matched the empty string,
+                            // it CAN NOT backtrack anymore
                         },
                     )
                 }
