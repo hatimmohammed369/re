@@ -570,56 +570,62 @@ impl Matcher {
         let concatenation_match = {
             // Match a concatenation expression
 
-            let children = self
+            let mut children = self
                 .pattern
                 .children
                 .borrow()
                 .iter()
-                .map(|rc| rc.borrow().clone())
+                .map(|rc| {
+                    let expr = rc.borrow().clone();
+                    // (expression, backtrack table entry index)
+                    (expr, Option::<usize>::None)
+                })
                 .collect::<Vec<_>>();
-            // Positions (indices) of children supporting backtrack in Vec `children`
-            // and in Matcher field `backtrack_table`
-            let mut backtracking_siblings_positions = Vec::<(usize, usize)>::new();
+
             let mut match_region_end = self.current;
             let mut child_index = 0usize;
+
             while child_index < children.len() {
-                let child = &children[child_index];
-                self.pattern = child.clone();
+                let child_entry = &mut children[child_index];
+                self.pattern = child_entry.0.clone();
+                if let Some(table_pos) = child_entry.1 {
+                    let table_entry = &mut self.backtrack_table[table_pos];
+                    if table_entry.backtracked_to_last_match_start {
+                        table_entry.last_match_start = self.current;
+                        table_entry.last_match_end = self.target.len();
+                        table_entry.backtracked_to_last_match_start = false;
+                    }
+                }
 
                 match self.compute_match() {
-                    Some(match_obj) => {
-                        // If this expression matched, then its match begins
-                        // right after the match of its predecessor
-                        // that's because Matcher field `self.current`
-                        // is never incremented before doing the actual matching
-                        // but it's incremented after a successful match
-                        match_region_end = match_obj.end;
-                        if Self::supports_backtracking(&self.pattern)
-                            && !backtracking_siblings_positions // do not list the same sibling twice
-                                .iter()
-                                .any(|(child_idx, _)| *child_idx == child_index)
-                        {
-                            backtracking_siblings_positions
-                                .push((child_index, self.backtrack_table.len() - 1));
+                    Some(child_match) => {
+                        match_region_end = child_match.end;
+                        if child_entry.1.is_none() && Self::supports_backtracking(&self.pattern) {
+                            let table_pos = self
+                                .backtrack_table
+                                .binary_search_by(|item| {
+                                    item.index_sequence.cmp(&self.pattern_index_sequence)
+                                })
+                                .unwrap();
+                            child_entry.1 = Some(table_pos);
                         }
                     }
                     None => {
-                        let nearest_preceeding_backtracking_sibling =
-                            backtracking_siblings_positions
-                                .iter()
-                                .filter(|(sibling_index, _table_entry_index)| {
-                                    // Sibling is actually before current index (child_index)
-                                    // and it has NOT backtracked to current match start
-                                })
-                                .next_back();
-                        match nearest_preceeding_backtracking_sibling.cloned() {
-                            Some((sibling_index, table_entry_index)) => {
-                                // Start matching from that backtracking preceeding sibling
-                                child_index = sibling_index;
-                                let table_entry = &self.backtrack_table[table_entry_index];
-                                // Restore position when this concatenation began matching
+                        let prev = children
+                            .iter()
+                            .enumerate()
+                            .filter(|(idx, (_, table_entry))| {
+                                *idx < child_index && table_entry.is_some()
+                            })
+                            .next_back();
+                        match prev {
+                            Some((idx, item)) => {
+                                child_index = idx;
+                                let table_entry = {
+                                    let table_entry_index = item.1.unwrap();
+                                    &self.backtrack_table[table_entry_index]
+                                };
                                 self.set_position(table_entry.last_match_start);
-                                // Fix subexpressions index tracker
                                 *self.pattern_index_sequence.last_mut().unwrap() = child_index;
                                 continue;
                             }
@@ -633,7 +639,8 @@ impl Matcher {
                                 self.set_position(old_position);
                                 // Abandon your children
                                 self.bubble_up();
-                                return None;
+
+                                return Option::<Match>::None;
                             }
                         }
                     }
