@@ -30,12 +30,6 @@ struct ExpressionBacktrackInfo {
     // field `next_match_bound` is, if positive, decremented by 1
     // Then next match of the associated expressoin must never exceed
     // index `next_match_bound`
-
-    // Did the associated expression backtrack all the
-    // way back to the first index in currenly computed match?
-    backtracked_to_start: bool,
-    // If this flag is set, then the associated expression
-    // can no longer backtrack or match
 }
 
 // Coordinator of the matching process
@@ -267,8 +261,6 @@ impl Matcher {
                     expr_info.first_match_start = computed_match.as_ref().unwrap().start;
 
                     let bound = &mut expr_info.next_match_bound;
-                    // To stop the associated expression from backtracking endlessly
-                    expr_info.backtracked_to_start = *bound == self.current_match_start;
                     // Decrement only if positive
                     *bound = bound.saturating_sub(1);
                 }
@@ -286,14 +278,6 @@ impl Matcher {
                             index_sequence: self.pattern_index_sequence.clone(),
                             first_match_start: computed_match.as_ref().unwrap().start,
                             next_match_bound: end,
-                            backtracked_to_start: false,
-                            // No need to `backtracked_to_start` to expression `end == self.current_match_start`
-                            // because it's means this expression just matched is an empty
-                            // expression (does not backtrack, and hence condition `Self::supports_backtracking` is false)
-                            // Or, this expression quantified by ? or * which are greedy be default
-                            // but they matched a string ending in index `self.current_match_start`
-                            // thus start is also `self.current_match_start` because start >= self.current_match_start
-                            // meaning the remaining target string is an empty string (no backtrack needed)
                         },
                     )
                 }
@@ -587,12 +571,9 @@ impl Matcher {
                         let nearest_preceeding_backtracking_sibling =
                             backtracking_siblings_positions
                                 .iter()
-                                .filter(|(sibling_index, table_entry_index)| {
+                                .filter(|(sibling_index, _table_entry_index)| {
                                     // Sibling is actually before current index (child_index)
                                     // and it has NOT backtracked to current match start
-                                    *sibling_index < child_index
-                                        && !self.backtrack_table[*table_entry_index]
-                                            .backtracked_to_start
                                 })
                                 .next_back();
                         match nearest_preceeding_backtracking_sibling.cloned() {
