@@ -20,16 +20,10 @@ struct ExpressionBacktrackInfo {
 
     // Position of first successful match of the associated expression
     // This field is never mutated once set
-    first_match_start: usize,
+    last_match_start: usize,
 
     // Upper exclusive bound next match MUST satisfy
-    next_match_bound: usize,
-    // First time the associated expression matches successfully
-    // field `next_match_bound` is set to that successful match end index
-    // Each time, including first, the associated expression successful matches,
-    // field `next_match_bound` is, if positive, decremented by 1
-    // Then next match of the associated expressoin must never exceed
-    // index `next_match_bound`
+    last_match_end: usize,
 }
 
 // Coordinator of the matching process
@@ -244,6 +238,11 @@ impl Matcher {
             // THEN
             // Record first match info for later use when backtracking
 
+            let (start, end) = {
+                let temp = computed_match.as_ref().unwrap();
+                (temp.start, temp.end)
+            };
+
             // Attempt to find current expression info entry
             let search_index = self.backtrack_table.binary_search_by(|info_entry| {
                 info_entry.index_sequence.cmp(&self.pattern_index_sequence)
@@ -251,33 +250,25 @@ impl Matcher {
             match search_index {
                 Ok(item_index) => {
                     // Found entry
-                    // Decrement `next_match_bound` to force it to
-                    // match a smaller range next time (when it backtracks)
 
                     let expr_info = &mut self.backtrack_table[item_index];
 
                     // Reset this entry because backtracking expressions are computed once
                     // during the first match and then used repeatedly by other matches
-                    expr_info.first_match_start = computed_match.as_ref().unwrap().start;
-
-                    let bound = &mut expr_info.next_match_bound;
-                    // Decrement only if positive
-                    *bound = bound.saturating_sub(1);
+                    expr_info.last_match_start = start;
+                    expr_info.last_match_end = end;
                 }
                 Err(insertion_index) => {
                     // This expression never matched before
                     // Insert a new info entry while maintaining order of all entries
                     // Entries (ExpressionBacktrackInfo objects) are sorted by field 'index_sequence'
 
-                    // Subtract 1 only if computed_match.end is positive
-                    let end = computed_match.as_ref().unwrap().end.saturating_sub(1);
-
                     self.backtrack_table.insert(
                         insertion_index,
                         ExpressionBacktrackInfo {
                             index_sequence: self.pattern_index_sequence.clone(),
-                            first_match_start: computed_match.as_ref().unwrap().start,
-                            next_match_bound: end,
+                            last_match_start: start,
+                            last_match_end: end,
                         },
                     )
                 }
@@ -367,7 +358,7 @@ impl Matcher {
                     .iter()
                     .find(|entry| entry.index_sequence == self.pattern_index_sequence);
                 match table_entry {
-                    Some(info) => info.next_match_bound,
+                    Some(info) => info.last_match_end.saturating_sub(1),
                     None => {
                         // This expression NEVER backtracked before
                         // or it does not support backtracking (like `x`)
@@ -582,7 +573,7 @@ impl Matcher {
                                 child_index = sibling_index;
                                 let table_entry = &self.backtrack_table[table_entry_index];
                                 // Restore position when this concatenation began matching
-                                self.set_position(table_entry.first_match_start);
+                                self.set_position(table_entry.last_match_start);
                                 // Fix subexpressions index tracker
                                 *self.pattern_index_sequence.last_mut().unwrap() = child_index;
                                 continue;
