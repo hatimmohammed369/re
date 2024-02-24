@@ -426,43 +426,62 @@ impl Matcher {
     // Match whatever grouped expression matched
     // and then apply the quantifiers after the group itself
     fn group_match(&mut self, quantifier: Quantifier) -> Option<Match> {
-        // Start tracking your children
-        self.dive();
-
         let old_pattern = self.pattern.clone();
         self.pattern = old_pattern.children.borrow()[0].borrow().clone();
 
         let grouped_expression_mactch = {
             // Match a grouped expression
 
-            match self.compute_match() {
-                Some(mut match_object) => {
-                    // Grouped expression match succeeded
-                    match quantifier {
-                        // Matching (E) and (E)?
-                        Quantifier::None | Quantifier::ZeroOrOne => Some(match_object),
-                        // Return whatever E returned
-
-                        // Matching (E)* and (E)+
-                        _ => {
-                            // Make expression E match as much as possible
-                            while let Some(new_match) = self.compute_match() {
-                                match_object.end = new_match.end;
-                            }
-                            Some(match_object)
-                        }
-                    }
+            let match_bound = {
+                // Find backtrack entry (in self.backtrack_table) of this group expression
+                let table_entry = self
+                    .backtrack_table
+                    .iter()
+                    .find(|entry| entry.index_sequence == self.pattern_index_sequence);
+                match table_entry {
+                    // This expression matched/backtracked before
+                    Some(info) => info.last_match_end.saturating_sub(1),
+                    // This expression NEVER matched/backtracked before
+                    None => self.target.len(),
                 }
-                None => {
-                    // Grouped expression match failed
-                    match quantifier {
-                        // (E) and (E)+ fail when E fails
-                        Quantifier::None | Quantifier::OneOrMore => Option::None,
+            };
 
-                        // (E)? and (E)* match empty string when E fails
-                        _ => self.empty_expression_match(),
-                    }
+            // Start tracking your child
+            self.dive();
+            // `self.dive()` MUST be called here because it mutates `self.pattern_index_sequence`
+            // which is used to find associated entry (in self.backtrack_table) of this group itself
+
+            let start = self.current;
+            let mut end = self.current;
+            // Keep matching inner expression unless match bound is exceeded
+            while let Some(new_match) = self.compute_match() {
+                if self.current > match_bound {
+                    // Match bound exceeded while matching inner expression
+                    // Roll back to end of most recent match
+                    self.set_position(end);
+                    break;
                 }
+                if new_match.is_empty() {
+                    // Stop matching inner expression E when it has
+                    // matched the empty string
+                    break;
+                }
+                // New match made without exceeding match bound
+                // Update match end index of this group expression
+                end = new_match.end;
+            }
+
+            if start == end {
+                // Empty range
+                match quantifier {
+                    // E failed, then so would (E) and (E)+
+                    Quantifier::None | Quantifier::OneOrMore => Option::<Match>::None,
+
+                    // E failed, then (E)? and (E)* match the empty string
+                    _ => self.empty_expression_match(),
+                }
+            } else {
+                Some(Match { start, end })
             }
 
             // Grouped expression computation ends
@@ -470,7 +489,7 @@ impl Matcher {
 
         // Restore parent pattern to process remaining siblings of current pattern
         self.pattern = old_pattern;
-        // Abandon your children
+        // Abandon your child
         self.bubble_up();
 
         grouped_expression_mactch
