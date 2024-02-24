@@ -333,68 +333,88 @@ impl Matcher {
         }
     }
 
-    // CHARACTER EXPRESSIONS:
+    // CHARACTER & DOT EXPRESSIONS:
     // x \ x? \ x* \ x+
+    // . \ .? \ .* \ .+
     // x is a single character
     // Also, x is not a metacharacter or it's an escaped metacharacter
     // metacharacters are defined in file `grammar`
     // for instance, k+ is a character expression
 
-    // HOW TO MATCH A CHARACTER EXPRESSION:
-    // Consume the longest (bounded above, if Matcher is backtracking) sequence of contiguous characters `value`
-    // When target is consumed, return None indicating failure
+    // HOW TO MATCH CHARACTER & DOT EXPRESSIONS?
+    // If field `value`, found in field `tag` of this expression, is Option::<char>::None
+    // then this character expression is actually a dot expression
+    // If this expression is `.`, consume a single character
+    // If this expression `x`, consume a single `x` only if current character is `x`
+    //
+    // For any other character (or dot) expression, if the expression NEVER matched before
+    // allow it to consume as many x's (or characters) as possible
+    // If the expression DID match before, use field `last_match_end` in its associated
+    // ExpressionBacktrackInfo in `self.backtrack_table`
+    // Temporarily subtract one (if possible) from field `last_match_end` and use it
+    // as a bound of current match
     fn character_expression_match(
         &mut self,
         value: Option<char>,
         quantifier: Quantifier,
     ) -> Option<Match> {
-        if !self.has_next() || (value.is_some() && self.target[self.current] != value.unwrap()) {
-            // No more characters to match or current character is not `x`
-            match quantifier {
-                // Matching `x` or `x+` at end fails
-                Quantifier::None | Quantifier::OneOrMore => None,
+        // Choose match bound (where the match ends)
+        // A non-backtracking expression (`.` or `x`) gets bound (self.current + 1)
+        // For any other expression subtract one (if possible) from field `last_match_end`
+        // found in its associated entry (ExpressionBacktrackInfo object) in self.backtrack_table
+        let match_bound = {
+            // Find backtrack table entry of this expression
+            // Expressions `.` and `x` DO NOT have such entries, NEVER
+            let table_entry = self
+                .backtrack_table
+                .iter()
+                .find(|entry| entry.index_sequence == self.pattern_index_sequence);
+            match table_entry {
+                // This expression can backtrack (a quantified `.` or `x`, for instance `.+`)
+                // AND also it has a backtrack table entry
+                Some(info) => info.last_match_end.saturating_sub(1),
 
-                // Expressions `x?` and `x*` at end match the empty string
+                None => {
+                    // This expression NEVER matched before
+                    // OR it does not support backtracking (like `x` or `.`)
+                    match quantifier {
+                        // Expressions `.` and `x`
+                        // Consume exactly one character
+                        Quantifier::None | Quantifier::ZeroOrOne => self.current + 1,
+
+                        // Quantified `.` or `x`
+                        // Consume as many characters as possible
+                        _ => self.target.len(),
+                    }
+                }
+            }
+        };
+
+        let start = self.current;
+        // Consume characters as long as there are unmatched characters
+        // only if this expression is a dot expression or the next unmatched
+        // character is `x` and this expression is one of: x \ x? \ x* \ x+
+        while self.has_next()
+            && self.current < match_bound
+            && !(value.is_some() && self.target[self.current] != value.unwrap())
+        {
+            self.advance();
+        }
+        let end = self.current;
+
+        if start == end {
+            // Empty range
+            match quantifier {
+                // Expressions . \ .+ \ x \ x+ MUST match at least one character
+                // they fail otherwise
+                Quantifier::None | Quantifier::OneOrMore => Option::<Match>::None,
+
+                // Expressions .? \ .* \ x? \ x* match the empty string
+                // when they fail to match at least one character
                 _ => self.empty_expression_match(),
             }
         } else {
-            let match_bound = {
-                let table_entry = self
-                    .backtrack_table
-                    .iter()
-                    .find(|entry| entry.index_sequence == self.pattern_index_sequence);
-                match table_entry {
-                    Some(info) => info.last_match_end.saturating_sub(1),
-                    None => {
-                        // This expression NEVER backtracked before
-                        // or it does not support backtracking (like `x`)
-                        match quantifier {
-                            // Consume exactly one `x`
-                            Quantifier::None | Quantifier::ZeroOrOne => self.current + 1,
-                            // Consume as many x's as possible
-                            _ => self.target.len(),
-                        }
-                    }
-                }
-            };
-
-            let start = self.current;
-            while self.current < match_bound
-                && !(value.is_some() && self.target[self.current] != value.unwrap())
-            {
-                self.advance();
-            }
-            let end = self.current;
-
-            if start == end {
-                // Empty range
-                match quantifier {
-                    Quantifier::None | Quantifier::OneOrMore => None,
-                    _ => self.empty_expression_match(),
-                }
-            } else {
-                Some(Match { start, end })
-            }
+            Some(Match { start, end })
         }
     }
 
