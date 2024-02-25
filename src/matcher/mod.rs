@@ -18,14 +18,20 @@ struct ExpressionBacktrackInfo {
     // the their respective parsed pattern syntax tree level
     index_sequence: Vec<usize>,
 
-    // Position of first successful match of the associated expression
-    // This field is never mutated once set
+    // Position of last successful match of the associated expression
     last_match_start: usize,
 
-    // Upper exclusive bound next match MUST satisfy
+    // End position of last successful match of the associated expression
     last_match_end: usize,
 
+    // True if the associated expression backtracked until it attempted to
+    // match with the range starting and ending at `last_match_start`
+    // False otherwise
     backtracked_to_last_match_start: bool,
+    // If true, reset fields of this ExpressionBacktrackInfo unless its
+    // associated expression has NO preceeding backtrackable sibling
+    // If it has no such sibling then its parent (a concatenation)
+    // fails to match
 }
 
 // Coordinator of the matching process
@@ -216,18 +222,16 @@ impl Matcher {
     fn compute_match(&mut self) -> Option<Match> {
         let computed_match = match self.pattern.tag.clone() {
             ExpressionTag::EmptyExpression => self.empty_expression_match(),
+
             ExpressionTag::CharacterExpression { value, quantifier } => {
                 self.character_expression_match(value, quantifier)
             }
+
             ExpressionTag::Group { quantifier } => self.group_match(quantifier),
+
             ExpressionTag::Alternation => self.alternation_match(),
             ExpressionTag::Concatenation => self.concatenation_match(),
         };
-
-        // Destroy last used bound
-        // BUT WHY?
-        // If last match is successful, then it makes no sense to make next expression
-        // backtrack making current one backtrack again (loop)
 
         // If current expression successfully matched AND
         // It can backtrack (like .?) AND
@@ -252,13 +256,14 @@ impl Matcher {
             match search_index {
                 Ok(item_index) => {
                     // Found entry
-
                     let expr_info = &mut self.backtrack_table[item_index];
-
-                    // Reset this entry because backtracking expressions are computed once
-                    // during the first match and then used repeatedly by other matches
+                    // Reset `last_match_start` to make this info entry usable
                     expr_info.last_match_start = start;
+                    // Update other values
                     expr_info.last_match_end = end;
+                    // When matching, expression `last_match_end - 1` is used current bound match
+                    // so if the expression made a match, variable `end` will have smaller value
+                    // than field `last_match_end`
                     expr_info.backtracked_to_last_match_start = start == end;
                 }
                 Err(insertion_index) => {
@@ -274,7 +279,8 @@ impl Matcher {
                             last_match_end: end,
                             backtracked_to_last_match_start: start == end,
                             // If this subexpression just matched the empty string,
-                            // it CAN NOT backtrack anymore
+                            // then reset its ExpressionBacktrackInfo
+                            // unless its has no preceeding sibling which can backtrack
                         },
                     )
                 }
@@ -450,6 +456,8 @@ impl Matcher {
             self.dive();
             // `self.dive()` MUST be called here because it mutates `self.pattern_index_sequence`
             // which is used to find associated entry (in self.backtrack_table) of this group itself
+            // Thus calling `self.dive()` before computing `match_bound` makes the search
+            // in `self.backtrack_table` always fail
 
             let start = self.current;
             let mut end = self.current;
@@ -457,7 +465,7 @@ impl Matcher {
             while let Some(new_match) = self.compute_match() {
                 if self.current > match_bound {
                     // Match bound exceeded while matching inner expression
-                    // Roll back to end of most recent match
+                    // Roll back to end of most recent successful match
                     self.set_position(end);
                     break;
                 }
@@ -519,6 +527,7 @@ impl Matcher {
                 .iter()
                 .map(|rc| rc.borrow().clone())
                 .collect::<Vec<_>>();
+
             let mut child_match = None;
             for child in children {
                 self.pattern = child;
@@ -557,9 +566,20 @@ impl Matcher {
     // E1 = a, E2 = ., E3 = (a+|b*), E4 = c*
 
     // HOW TO MATCH A CONCATENATION EXPRESSION:
-    // If at least one child fails, then the whole expression fails too
-    // Otherwise return the range starting from first child match
-    // and ending with last child match
+    // Match one child after another in order
+    // Let E be any child expression of the concatenation expression
+    // If E can backtrack and its has backtracked to start of its last successful match
+    // then reset its entry in `self.backtrack_table`
+    // Attempt to match subexpression E
+    // If match succeeded proceed to match next sibling of E
+    // If match failed:
+    // check if has at least one preceeding sibling which can backtrack
+    // If there is no such sibling then the whole expression fails
+    // If there IS AT LEAST one sibling which can backtrack
+    // set Matcher position to start position of that sibling
+    // and roll back to that sibling and begin matching towards the end again
+    // Repeat this procees until the last subexpression succeeds
+    // or the first subexpression which can backtrack fails to match
     fn concatenation_match(&mut self) -> Option<Match> {
         // Start tracking your children
         self.dive();
@@ -591,6 +611,10 @@ impl Matcher {
                 if let Some(table_pos) = child_entry.1 {
                     let table_entry = &mut self.backtrack_table[table_pos];
                     if table_entry.backtracked_to_last_match_start {
+                        // This expression backtracked all the way back to start
+                        // of its last successful match
+                        // Reset its entry in `self.backtrack_table`
+                        // to make it usable again
                         table_entry.last_match_start = self.current;
                         table_entry.last_match_end = self.target.len();
                         table_entry.backtracked_to_last_match_start = false;
@@ -601,6 +625,7 @@ impl Matcher {
                     Some(child_match) => {
                         match_region_end = child_match.end;
                         if child_entry.1.is_none() && Self::supports_backtracking(&self.pattern) {
+                            // Save backtrack info entry index of this expression
                             let table_pos = self
                                 .backtrack_table
                                 .binary_search_by(|item| {
@@ -611,6 +636,7 @@ impl Matcher {
                         }
                     }
                     None => {
+                        // First preceeding sibling which can backtrack
                         let prev = children
                             .iter()
                             .enumerate()
@@ -620,12 +646,15 @@ impl Matcher {
                             .next_back();
                         match prev {
                             Some((idx, item)) => {
+                                // Let processing resume from that sibling
                                 child_index = idx;
                                 let table_entry = {
                                     let table_entry_index = item.1.unwrap();
                                     &self.backtrack_table[table_entry_index]
                                 };
+                                // Resume matching from the last successful match start of that sibling
                                 self.set_position(table_entry.last_match_start);
+                                // Fix subexpressions tracker
                                 *self.pattern_index_sequence.last_mut().unwrap() = child_index;
                                 continue;
                             }
