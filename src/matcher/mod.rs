@@ -606,14 +606,35 @@ impl Matcher {
             let mut child_index = 0usize;
 
             while child_index < children.len() {
-                let child_entry = &mut children[child_index];
-                self.pattern = child_entry.0.clone();
-                if let Some(table_pos) = child_entry.1 {
+                let (child, table_info_pos) = {
+                    let child_entry = &mut children[child_index];
+                    (child_entry.0.clone(), child_entry.1)
+                };
+
+                // First preceeding sibling which can backtrack
+                let prev = children[0..child_index]
+                    .iter()
+                    .enumerate()
+                    .filter(|(idx, (_, table_entry))| {
+                        let is_preceeding = *idx < child_index;
+                        let supports_backtracking = table_entry.is_some();
+                        let can_backtrack_again = supports_backtracking
+                            && !self.backtrack_table[table_entry.unwrap()]
+                                .backtracked_to_last_match_start;
+                        is_preceeding && can_backtrack_again
+                    })
+                    .map(|(idx, (_, table_entry))| (idx, table_entry))
+                    .next_back();
+
+                self.pattern = child.clone();
+                if let Some(table_pos) = table_info_pos {
+                    // First preceeding sibling which can backtrack
                     let table_entry = &mut self.backtrack_table[table_pos];
-                    if table_entry.backtracked_to_last_match_start {
+                    if prev.is_some() && table_entry.backtracked_to_last_match_start {
                         // This expression backtracked all the way back to start
-                        // of its last successful match
-                        // Reset its entry in `self.backtrack_table`
+                        // of its last successful match and it has
+                        // a preceeding sibling which can backtrack, then
+                        // reset its entry in `self.backtrack_table`
                         // to make it usable again
                         table_entry.last_match_start = self.current;
                         table_entry.last_match_end = self.target.len();
@@ -623,8 +644,10 @@ impl Matcher {
 
                 match self.compute_match() {
                     Some(child_match) => {
+                        let table_entry_index = &mut children[child_index].1;
                         match_region_end = child_match.end;
-                        if child_entry.1.is_none() && Self::supports_backtracking(&self.pattern) {
+                        if table_entry_index.is_none() && Self::supports_backtracking(&self.pattern)
+                        {
                             // Save backtrack info entry index of this expression
                             let table_pos = self
                                 .backtrack_table
@@ -632,24 +655,18 @@ impl Matcher {
                                     item.index_sequence.cmp(&self.pattern_index_sequence)
                                 })
                                 .unwrap();
-                            child_entry.1 = Some(table_pos);
+                            *table_entry_index = Some(table_pos);
                         }
                     }
                     None => {
                         // First preceeding sibling which can backtrack
-                        let prev = children
-                            .iter()
-                            .enumerate()
-                            .filter(|(idx, (_, table_entry))| {
-                                *idx < child_index && table_entry.is_some()
-                            })
-                            .next_back();
                         match prev {
-                            Some((idx, item)) => {
+                            Some((child_idx, table_entry_idx)) => {
                                 // Let processing resume from that sibling
-                                child_index = idx;
+                                child_index = child_idx;
+
                                 let table_entry = {
-                                    let table_entry_index = item.1.unwrap();
+                                    let table_entry_index = table_entry_idx.unwrap();
                                     &self.backtrack_table[table_entry_index]
                                 };
                                 // Resume matching from the last successful match start of that sibling
