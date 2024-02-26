@@ -45,11 +45,6 @@ pub struct Matcher {
     // Where to start matching
     current: usize,
 
-    // Which index the currently computed match begins at
-    current_match_start: usize,
-    // Expressions are not allowed to backtrack before `current_match_start`
-    // to keep generated matches non-overlapping
-
     // True if Matcher generated an empty string match in current position
     // False otherwise
     matched_empty_string: bool,
@@ -77,7 +72,6 @@ impl Matcher {
         let pattern = parse(pattern)?;
         let target = target.chars().collect();
         let current = 0;
-        let current_match_start = 0;
         let matched_empty_string = false;
         let pattern_index_sequence = vec![];
         let backtrack_table = vec![];
@@ -85,7 +79,6 @@ impl Matcher {
             pattern,
             target,
             current,
-            current_match_start,
             matched_empty_string,
             pattern_index_sequence,
             backtrack_table,
@@ -147,8 +140,6 @@ impl Matcher {
         let mut match_attempt;
         loop {
             match_attempt = self.compute_match();
-            // Remove backtrack info relevant last performed match
-            // because we need to record bounds based on `self.current_match_start`
             self.backtrack_table.clear();
             if match_attempt.is_none() {
                 // Last match failed
@@ -169,11 +160,7 @@ impl Matcher {
                     // matching the empty string at the same position
                     // because the empty string can match anywhere
                     self.advance();
-                    // So we don't get stuck at the same position matching the empty string forever
-                    self.current_match_start += 1;
                 } else {
-                    // Next match starts right after current one
-                    self.current_match_start = match_attempt.as_ref().unwrap().end;
                 }
                 break;
             }
