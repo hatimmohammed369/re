@@ -111,58 +111,6 @@ impl Matcher {
         self.backtrack_table.clear();
     }
 
-    // Find the next match (non-overlapping with previous match)
-    pub fn find_match(&mut self) -> Option<Match> {
-        if self.pos > self.target.len() && self.matched_trailing_empty_string {
-            return Option::<Match>::None;
-        }
-
-        if self.pos >= self.target.len() {
-            self.matched_trailing_empty_string = true;
-        }
-
-        // Track root expression
-        self.dive();
-
-        // WHY WE NEED A LOOP?
-        // Because first match in target string may not be index 0
-        // and hence we need to keep matching until we hit the first match
-        // or reach end of target
-        let mut match_attempt;
-        loop {
-            match_attempt = self.compute_match();
-            self.backtrack_table.clear();
-            if match_attempt.is_none() {
-                // Last match failed
-                if self.has_next() {
-                    // Move forward to retry
-                    // ADVANCE
-                    self.advance();
-                } else {
-                    // No more characters to process
-                    // HALT
-                    break;
-                }
-            } else {
-                // Return matched region
-                if match_attempt.as_ref().unwrap().is_empty() {
-                    // Matched the empty string in current position
-                    // Matcher MUST advance or it will loop endlessly
-                    // matching the empty string at the same position
-                    // because the empty string can match anywhere
-                    self.advance();
-                } else {
-                }
-                break;
-            }
-        }
-
-        // Abandon root expression
-        self.bubble_up();
-
-        match_attempt
-    }
-
     fn supports_backtracking(expr: &Regexp) -> bool {
         // An arbitrary expression E supports backtracking if:
         // 1 - It's quantified, in other words it's preceeding a quantifier (like .*)
@@ -674,5 +622,61 @@ impl Matcher {
         self.bubble_up();
 
         concatenation_match
+    }
+}
+
+impl Iterator for Matcher {
+    type Item = Match;
+
+    // Find the next match (non-overlapping with previous match)
+    fn next(&mut self) -> Option<Match> {
+        if self.pos > self.target.len() && self.matched_trailing_empty_string {
+            return Option::<Match>::None;
+        }
+
+        if self.pos >= self.target.len() {
+            self.matched_trailing_empty_string = true;
+        }
+
+        // Track root expression
+        self.dive();
+
+        // WHY WE NEED A LOOP?
+        // Because first match in target string may not start at index 0
+        // and hence we need to keep matching until we hit the
+        // first successful match or reach end of target
+        let mut match_attempt;
+        loop {
+            match_attempt = self.compute_match();
+            self.backtrack_table.clear();
+            if match_attempt.is_none() {
+                // Last match failed
+                if self.has_next() {
+                    // Move forward to retry
+                    // ADVANCE
+                    self.advance();
+                } else {
+                    // No more characters to process
+                    // HALT
+                    break;
+                }
+            } else {
+                // Return matched region
+                if match_attempt.as_ref().unwrap().is_empty() {
+                    // Matched the empty string in current position
+                    // Matcher MUST advance or it will loop endlessly
+                    // matching the empty string at the same position
+                    // because the empty string can match anywhere
+                    self.advance();
+                } else {
+                }
+                break;
+            }
+        }
+
+        // Abandon root expression
+        self.bubble_up();
+
+        match_attempt
     }
 }
