@@ -8,10 +8,10 @@ use std::rc::{Rc, Weak};
 
 #[derive(Debug, Clone)]
 pub enum Quantifier {
-    None,
-    ZeroOrOne,
-    ZeroOrMore,
-    OneOrMore,
+    None,       // No quantifier
+    ZeroOrOne,  // Quantifier ?
+    ZeroOrMore, // Quantifier *
+    OneOrMore,  // Quantifier +
 }
 
 impl From<&Option<Token>> for Quantifier {
