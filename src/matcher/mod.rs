@@ -45,9 +45,7 @@ pub struct Matcher {
     // Where to start matching
     pos: usize,
 
-    // True if Matcher generated an empty string match in current position
-    // False otherwise
-    matched_empty_string: bool,
+    matched_trailing_empty_string: bool,
 
     // The last item in this Vec represent the index of current pattern among its siblings in
     // current syntax tree level
@@ -72,14 +70,14 @@ impl Matcher {
         let pattern = parse(pattern)?;
         let target = target.chars().collect();
         let pos = 0;
-        let matched_empty_string = false;
+        let matched_trailing_empty_string = false;
         let pattern_index_sequence = vec![];
         let backtrack_table = vec![];
         Ok(Matcher {
             pattern,
             target,
             pos,
-            matched_empty_string,
+            matched_trailing_empty_string,
             pattern_index_sequence,
             backtrack_table,
         })
@@ -98,13 +96,11 @@ impl Matcher {
     #[inline(always)]
     fn set_position(&mut self, pos: usize) {
         self.pos = pos;
-        self.matched_empty_string = false;
     }
 
     #[inline(always)]
     fn advance(&mut self) {
         self.pos += 1;
-        self.matched_empty_string = false;
     }
 
     // Assign a new target to match on
@@ -117,8 +113,12 @@ impl Matcher {
 
     // Find the next match (non-overlapping with previous match)
     pub fn find_match(&mut self) -> Option<Match> {
-        if self.pos > self.target.len() {
+        if self.pos > self.target.len() && self.matched_trailing_empty_string {
             return Option::<Match>::None;
+        }
+
+        if self.pos >= self.target.len() {
+            self.matched_trailing_empty_string = true;
         }
 
         // Track root expression
@@ -292,29 +292,14 @@ impl Matcher {
     // ...| `after the trailing |`
     // ...||... `between the two |`
 
-    // HOW TO MATCH AN EMPTY STRING EXPRESSION:
-    // Match current position in `target` against the empty regular expression
-    // this function always succeeds, returning Some(Match)
-    // because the empty string always matches even inside another empty string
-    // There is only one case when this function fails (return None)
-    // it's when Matcher matched the trailing empty string (empty string after the last valid index)
-    // it makes sense to stop there or Matcher would endlessly match that trailing empty string
+    // Always match
+    #[inline(always)]
     fn empty_expression_match(&mut self) -> Option<Match> {
-        if !self.matched_empty_string || self.has_next() {
-            // Not matched empty string here or not all characters processed
-            // logical negation of: Matched trailing empty string
-            // which is (self.matched_empty_string && !self.has_next())
-            self.matched_empty_string = true;
-            Some(Match {
-                start: self.current(),
-                end: self.current(),
-            })
-        } else {
-            // Matched trailing empty string
-            // Target string is completely consumed
-            // NO MORE MATCHES FOR THIS TARGET
-            None
-        }
+        let current = self.current();
+        Some(Match {
+            start: current,
+            end: current,
+        })
     }
 
     // CHARACTER & DOT EXPRESSIONS:
@@ -439,6 +424,7 @@ impl Matcher {
 
             let start = self.current();
             let mut end = self.current();
+            let mut matched_empty_string = false;
             // Keep matching inner expression unless match bound is exceeded
             while let Some(new_match) = self.compute_match() {
                 if self.pos > match_bound {
@@ -447,7 +433,7 @@ impl Matcher {
                     self.set_position(end);
                     break;
                 }
-                if new_match.is_empty() {
+                if new_match.is_empty() && matched_empty_string {
                     // Stop matching inner expression E when it has
                     // matched the empty string
                     break;
@@ -455,9 +441,10 @@ impl Matcher {
                 // New match made without exceeding match bound
                 // Update match end index of this group expression
                 end = new_match.end;
+                matched_empty_string = new_match.is_empty();
             }
 
-            if start == end {
+            if start == end && !matched_empty_string {
                 // Empty range
                 match quantifier {
                     // E failed, then so would (E) and (E)+
@@ -562,7 +549,6 @@ impl Matcher {
         // Start tracking your children
         self.dive();
 
-        let old_empty_string_match = self.matched_empty_string;
         let old_position = self.current();
         let old_pattern = self.pattern.clone();
 
@@ -585,8 +571,6 @@ impl Matcher {
             let mut child_index = 0usize;
 
             while child_index < children.len() {
-                self.matched_empty_string = false;
-
                 let (child, table_info_pos) = {
                     let child_entry = &mut children[child_index];
                     (child_entry.0.clone(), child_entry.1)
@@ -667,7 +651,6 @@ impl Matcher {
                                 self.set_position(old_position);
                                 // Abandon your children
                                 self.bubble_up();
-                                self.matched_empty_string = old_empty_string_match;
                                 return Option::<Match>::None;
                             }
                         }
@@ -686,7 +669,6 @@ impl Matcher {
             })
         };
 
-        self.matched_empty_string = old_empty_string_match;
         self.pattern = old_pattern.clone();
         // Abandon your children
         self.bubble_up();
