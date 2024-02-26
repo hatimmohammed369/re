@@ -43,7 +43,7 @@ pub struct Matcher {
     target: Vec<char>,
 
     // Where to start matching
-    current: usize,
+    pos: usize,
 
     // True if Matcher generated an empty string match in current position
     // False otherwise
@@ -71,53 +71,40 @@ impl Matcher {
     pub fn new(pattern: &str, target: &str) -> Result<Matcher, String> {
         let pattern = parse(pattern)?;
         let target = target.chars().collect();
-        let current = 0;
+        let pos = 0;
         let matched_empty_string = false;
         let pattern_index_sequence = vec![];
         let backtrack_table = vec![];
         Ok(Matcher {
             pattern,
             target,
-            current,
+            pos,
             matched_empty_string,
             pattern_index_sequence,
             backtrack_table,
         })
     }
 
+    #[inline(always)]
+    fn current(&self) -> usize {
+        std::cmp::min(self.pos, self.target.len())
+    }
+
+    #[inline(always)]
     fn has_next(&self) -> bool {
-        self.current < self.target.len()
+        self.pos < self.target.len()
     }
 
+    #[inline(always)]
     fn set_position(&mut self, pos: usize) {
-        let pos = if pos > self.target.len() {
-            self.target.len()
-        } else {
-            pos
-        };
-
-        let old_pos = self.current;
-        self.current = pos;
-
-        if old_pos < self.target.len() || !self.matched_empty_string {
-            // !( old_pos == self.target.len() && self.matched_empty_string )
-            // calling one of `self.set_position` or `self.advance`
-            // ensures that old position (old_pos) is never greater than self.target.len()
-            // so !(old_pos == self.target.len()) is never (old_pos > self.target.len())
-            // hence it MUST be (old_pos < self.target.len())
-
-            // It's NOT the case that we matched the trailing empty string
-            // If we matched the trailing empty string and unset flag `matched_empty_string`
-            // then Matcher would get stuck in a loop, indefinitely matching the trailing empty
-            // because it setting and unsetting flag `matched_empty_string`
-            self.matched_empty_string = false;
-        }
+        self.pos = pos;
+        self.matched_empty_string = false;
     }
 
+    #[inline(always)]
     fn advance(&mut self) {
-        if self.current < self.target.len() {
-            self.current += 1;
-        }
+        self.pos += 1;
+        self.matched_empty_string = false;
     }
 
     // Assign a new target to match on
@@ -130,6 +117,10 @@ impl Matcher {
 
     // Find the next match (non-overlapping with previous match)
     pub fn find_match(&mut self) -> Option<Match> {
+        if self.pos > self.target.len() {
+            return Option::<Match>::None;
+        }
+
         // Track root expression
         self.dive();
 
@@ -315,8 +306,8 @@ impl Matcher {
             // which is (self.matched_empty_string && !self.has_next())
             self.matched_empty_string = true;
             Some(Match {
-                start: self.current,
-                end: self.current,
+                start: self.current(),
+                end: self.current(),
             })
         } else {
             // Matched trailing empty string
@@ -373,7 +364,7 @@ impl Matcher {
                     match quantifier {
                         // Expressions `.` and `x`
                         // Consume exactly one character
-                        Quantifier::None | Quantifier::ZeroOrOne => self.current + 1,
+                        Quantifier::None | Quantifier::ZeroOrOne => self.pos + 1,
 
                         // Quantified `.` or `x`
                         // Consume as many characters as possible
@@ -383,17 +374,17 @@ impl Matcher {
             }
         };
 
-        let start = self.current;
+        let start = self.current();
         // Consume characters as long as there are unmatched characters
         // only if this expression is a dot expression or the next unmatched
         // character is `x` and this expression is one of: x \ x? \ x* \ x+
         while self.has_next()
-            && self.current < match_bound
-            && !(value.is_some() && self.target[self.current] != value.unwrap())
+            && self.pos < match_bound
+            && !(value.is_some() && self.target[self.pos] != value.unwrap())
         {
             self.advance();
         }
-        let end = self.current;
+        let end = self.current();
 
         if start == end {
             // Empty range
@@ -446,11 +437,11 @@ impl Matcher {
             // Thus calling `self.dive()` before computing `match_bound` makes the search
             // in `self.backtrack_table` always fail
 
-            let start = self.current;
-            let mut end = self.current;
+            let start = self.current();
+            let mut end = self.current();
             // Keep matching inner expression unless match bound is exceeded
             while let Some(new_match) = self.compute_match() {
-                if self.current > match_bound {
+                if self.pos > match_bound {
                     // Match bound exceeded while matching inner expression
                     // Roll back to end of most recent successful match
                     self.set_position(end);
@@ -501,7 +492,7 @@ impl Matcher {
         // Start tracking your children
         self.dive();
 
-        let old_position = self.current;
+        let old_position = self.current();
         let old_pattern = self.pattern.clone();
 
         let alternation_match = {
@@ -571,7 +562,8 @@ impl Matcher {
         // Start tracking your children
         self.dive();
 
-        let old_position = self.current;
+        let old_empty_string_match = self.matched_empty_string;
+        let old_position = self.current();
         let old_pattern = self.pattern.clone();
 
         let concatenation_match = {
@@ -589,10 +581,12 @@ impl Matcher {
                 })
                 .collect::<Vec<_>>();
 
-            let mut match_region_end = self.current;
+            let mut match_region_end = self.current();
             let mut child_index = 0usize;
 
             while child_index < children.len() {
+                self.matched_empty_string = false;
+
                 let (child, table_info_pos) = {
                     let child_entry = &mut children[child_index];
                     (child_entry.0.clone(), child_entry.1)
@@ -616,6 +610,7 @@ impl Matcher {
                 self.pattern = child.clone();
                 if let Some(table_pos) = table_info_pos {
                     // First preceeding sibling which can backtrack
+                    let cur = self.current();
                     let table_entry = &mut self.backtrack_table[table_pos];
                     if prev.is_some() && table_entry.backtracked_to_last_match_start {
                         // This expression backtracked all the way back to start
@@ -623,7 +618,7 @@ impl Matcher {
                         // a preceeding sibling which can backtrack, then
                         // reset its entry in `self.backtrack_table`
                         // to make it usable again
-                        table_entry.last_match_start = self.current;
+                        table_entry.last_match_start = cur;
                         table_entry.last_match_end = self.target.len();
                         table_entry.backtracked_to_last_match_start = false;
                     }
@@ -672,7 +667,7 @@ impl Matcher {
                                 self.set_position(old_position);
                                 // Abandon your children
                                 self.bubble_up();
-
+                                self.matched_empty_string = old_empty_string_match;
                                 return Option::<Match>::None;
                             }
                         }
@@ -691,6 +686,7 @@ impl Matcher {
             })
         };
 
+        self.matched_empty_string = old_empty_string_match;
         self.pattern = old_pattern.clone();
         // Abandon your children
         self.bubble_up();
