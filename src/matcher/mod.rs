@@ -854,4 +854,34 @@ impl Matcher {
     pub fn split(&mut self) -> Vec<String> {
         self.splitn(self.target.len() + 1)
     }
+
+    // Return copy of target with `subs_count` substitutions replacing
+    // each match with `repl`
+    pub fn subn(&mut self, repl: &str, mut subs_count: usize) -> String {
+        let target = self.target.iter().collect::<String>();
+        if subs_count == 0 {
+            return target;
+        }
+
+        let mut result = String::with_capacity(self.target.len() + subs_count * repl.len() + 1);
+        let mut split_start = 0;
+        for m in self.by_ref() {
+            if subs_count > 0 {
+                result.push_str(&target[split_start..m.start]);
+                result.push_str(repl);
+                split_start = m.end;
+                subs_count -= 1;
+            } else {
+                break;
+            }
+        }
+        result.push_str(&target[split_start..]);
+
+        result
+    }
+
+    // Return copy of target with each match replaced with `repl`
+    pub fn sub(&mut self, repl: &str) -> String {
+        self.subn(repl, self.target.len() + 1)
+    }
 }
