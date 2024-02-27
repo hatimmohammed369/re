@@ -15,6 +15,9 @@ full-grammar
 
 # ignore binary main.rs which is mainly used to for testing code
 /src/main.rs
+/src/scanner/main.rs
+/src/parser/main.rs
+/src/matcher/main.rs
 
 /target
 
