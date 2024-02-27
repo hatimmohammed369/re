@@ -139,7 +139,19 @@ impl Matcher {
     // Assign a new target to match on
     pub fn assign_match_target(&mut self, target: &str) {
         self.target = target.chars().collect();
-        self.set_position(0);
+        self.reset();
+    }
+
+    // Reset state and use old pattern
+    pub fn reset(&mut self) {
+        self.seek(0);
+    }
+
+    pub fn seek(&mut self, position: usize) {
+        // Rewind
+        self.set_position(position);
+        // You can match trailing empty string again
+        self.matched_trailing_empty_string = false;
         // Stop tracking expressions
         self.pattern_index_sequence.clear();
         // Do not use old backtrack info
