@@ -801,3 +801,30 @@ impl Iterator for Matcher {
         match_attempt
     }
 }
+
+// Useful methods
+impl Matcher {
+    // Does some range within the target matches pattern?
+    pub fn is_matching(&mut self) -> bool {
+        match self.next() {
+            None => {
+                // May be Matcher consumed itself
+                // Retry from the very start
+                self.reset(0);
+                self.next().is_some()
+            }
+            Some(_) => true,
+        }
+    }
+
+    // Return true if the whole target fully matches pattern
+    // In other words, there is exactly one match starting from index 0
+    // ending at index N where N is target length
+    pub fn fullmatch(&mut self) -> bool {
+        self.reset(0);
+        match self.next() {
+            Some(m) => m.start == 0 && m.end == self.target.len(),
+            None => false,
+        }
+    }
+}
