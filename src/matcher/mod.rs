@@ -827,4 +827,31 @@ impl Matcher {
             None => false,
         }
     }
+
+    // Split target `splits_count` times
+    // A large splits_count splits the whole target
+    pub fn splitn(&mut self, splits_count: usize) -> Vec<String> {
+        if splits_count == 0 {
+            return vec![];
+        }
+
+        self.reset(0);
+        let target = self.target.iter().collect::<String>();
+        let mut splits = vec![];
+        let mut split_start = 0;
+        for m in self.by_ref() {
+            if splits.len() < splits_count {
+                splits.push(target[split_start..m.start].to_string());
+                split_start = m.end;
+            }
+        }
+        splits.push(target[split_start..target.len()].to_string());
+
+        splits
+    }
+
+    // Split the whole target
+    pub fn split(&mut self) -> Vec<String> {
+        self.splitn(self.target.len() + 1)
+    }
 }
