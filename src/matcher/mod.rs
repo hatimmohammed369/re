@@ -2,6 +2,29 @@
 
 use crate::parser::{parse, syntax_tree::*};
 
+const METACHARACTERS: [char; 7] = ['(', ')', '\\', '|', '*', '.', '?'];
+
+pub fn escape(pattern: &str) -> String {
+    // Escape all metacharacters in `pattern`
+    let mut escaped = String::with_capacity(
+        // Possible each character is a metacharacter
+        // requiring two slashes
+        3 * pattern.len(),
+    );
+    for ch in pattern.chars() {
+        if METACHARACTERS.contains(&ch) {
+            // Add a slash to escaped the metacharacter
+            // You need to write one slash BUT Rust needs you to escape this one slash
+            // so actually we need 2 slashes
+            escaped.push('\\'); // Rust escaping slash
+            escaped.push('\\'); // Regexp escaping slash
+        }
+        escaped.push(ch);
+    }
+    escaped.shrink_to_fit();
+    escaped
+}
+
 // Match operation outcome
 pub type Match = std::ops::Range<usize>;
 

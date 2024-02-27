@@ -58,6 +58,7 @@ OrdinaryCharacter => [^\(\)\\\|\*\.\?]
 
 EscapedMetacharacter => "\" Metacharacter
 
+# Update const `METACHARACTERS` in src/matcher/mod.rs
 Metacharacter => LeftParen | RightParen | Slash | Pipe | Star | Dot | Mark
 
 LeftParen => "("
