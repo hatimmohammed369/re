@@ -166,7 +166,7 @@ impl Matcher {
 
     // ALL EXPRESSIONS MUST RESTORE OLD POSITION WHEN FAILING TO MATCH
     fn compute_match(&mut self) -> Option<Match> {
-        let computed_match = match self.pattern.tag.clone() {
+        let computed_match = match self.pattern.tag {
             ExpressionTag::EmptyExpression => self.empty_expression_match(),
 
             ExpressionTag::CharacterExpression { value, quantifier } => {

@@ -1,12 +1,11 @@
 // Syntax tree structs (Tokens structures)
 
 use crate::scanner::tokens::*;
-use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::fmt::Display;
 use std::rc::{Rc, Weak};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Quantifier {
     None,       // No quantifier
     ZeroOrOne,  // Quantifier ?
@@ -33,16 +32,17 @@ impl From<&Option<Token>> for Quantifier {
 
 impl Display for Quantifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::None => write!(f, ""),
-            Self::ZeroOrOne => write!(f, "?"),
-            Self::ZeroOrMore => write!(f, "*"),
-            Self::OneOrMore => write!(f, "+"),
-        }
+        let string_value = match self {
+            Self::None => "",
+            Self::ZeroOrOne => "?",
+            Self::ZeroOrMore => "*",
+            Self::OneOrMore => "+",
+        };
+        write!(f, "{string_value}")
     }
 }
 // Expression type
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum ExpressionTag {
     // Empty string expression
     // the expression between ( and ) in string `()`
@@ -80,6 +80,9 @@ pub struct Regexp {
     // -- Which expression this wrapper contains
     pub tag: ExpressionTag,
 
+    // Pattern of this (sub)expression
+    pub pattern: String,
+
     // -- Parent expression of this object
     // * We use a Weak reference to avoid reference cycles
     // because parent points to child and child points to parent
@@ -106,60 +109,27 @@ pub struct Regexp {
 // as a default tag, and still gives an `initialized` object
 impl Regexp {
     pub fn new(tag: ExpressionTag) -> Self {
+        let pattern = String::new();
         let parent = None;
         let children = RefCell::new(vec![]);
         Regexp {
             tag,
+            pattern,
             parent,
             children,
-        }
-    }
-
-    fn as_string(&self) -> String {
-        match &self.tag {
-            ExpressionTag::EmptyExpression => String::new(),
-
-            ExpressionTag::CharacterExpression { value, quantifier } => {
-                let value = value.unwrap_or('.');
-                format!("{value}{quantifier}")
-            }
-
-            ExpressionTag::Group { quantifier } => {
-                format!(
-                    "({}){quantifier}",
-                    RefCell::borrow(self.children.borrow()[0].borrow()).as_string()
-                )
-            }
-
-            ExpressionTag::Concatenation => self
-                .children
-                .borrow()
-                .iter()
-                .map(|rc_refcell_expr| RefCell::borrow(rc_refcell_expr.borrow()).as_string())
-                .fold(String::new(), |e1, e2| format!("{e1}{e2}")),
-
-            ExpressionTag::Alternation => {
-                let mut alternation = String::new();
-                for child in self.children.borrow().iter() {
-                    let child: &RefCell<Regexp> = child.as_ref();
-                    let child = child.borrow();
-                    let child = child.as_string();
-                    alternation.push_str(&format!("{child}|"))
-                }
-                alternation.pop();
-                alternation
-            }
         }
     }
 }
 
 impl Clone for Regexp {
     fn clone(&self) -> Self {
-        let tag = self.tag.clone();
+        let tag = self.tag;
+        let pattern = String::new();
         let parent = self.parent.as_ref().map(Weak::clone);
         let children = RefCell::new(self.children.borrow().iter().map(Rc::clone).collect());
         Regexp {
             tag,
+            pattern,
             parent,
             children,
         }
@@ -168,6 +138,6 @@ impl Clone for Regexp {
 
 impl Display for Regexp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_string())
+        write!(f, "{}", self.pattern)
     }
 }
