@@ -92,6 +92,19 @@ pub struct Matcher {
 
     // Backtrack info of all subexpressions which can backtrack
     backtrack_table: Vec<ExpressionBacktrackInfo>,
+
+    // Successful matches
+    match_cache: Vec<Match>,
+
+    // Target substring containing all matches start index
+    matches_substring_start: Option<usize>,
+
+    // Target substring containing all matches end index
+    matches_substring_end: usize,
+
+    // Did this Matcher consume the whole target?
+    // Once set it's never unset
+    consumed_target: bool,
 }
 
 impl Matcher {
@@ -104,6 +117,11 @@ impl Matcher {
         let matched_trailing_empty_string = false;
         let pattern_index_sequence = vec![];
         let backtrack_table = vec![];
+        let match_cache = vec![];
+        let matches_substring_start = Option::<usize>::None;
+        let matches_substring_end = 0;
+        let consumed_target = false;
+
         Ok(Matcher {
             pattern,
             target,
@@ -111,6 +129,10 @@ impl Matcher {
             matched_trailing_empty_string,
             pattern_index_sequence,
             backtrack_table,
+            match_cache,
+            matches_substring_start,
+            matches_substring_end,
+            consumed_target,
         })
     }
 
@@ -139,6 +161,7 @@ impl Matcher {
     // Assign a new target to match on
     pub fn assign_match_target(&mut self, target: &str) {
         self.target = target.chars().collect();
+        self.match_cache.clear();
         self.reset();
     }
 
@@ -757,6 +780,16 @@ impl Iterator for Matcher {
             self.matched_trailing_empty_string = true;
             // In other words, do NOT attempt to match after this call of `next`
             // just return Option::<Match>::None siganling end of iterator
+            self.consumed_target = true;
+        }
+
+        if let Some(cached_range) = { self.match_cache.iter().find(|m| self.pos <= m.start) } {
+            self.pos = cached_range.end;
+            return Some(cached_range.clone());
+        }
+
+        if self.consumed_target {
+            return Option::<Match>::None;
         }
 
         // Track root expression
@@ -784,13 +817,26 @@ impl Iterator for Matcher {
                 }
             } else {
                 // Return matched region
-                if match_attempt.as_ref().unwrap().is_empty() {
+                let match_attempt = match_attempt.clone().unwrap();
+                if match_attempt.is_empty() {
                     // Matched the empty string in current position
                     // Matcher MUST advance or it will loop endlessly
                     // matching the empty string at the same position
                     // because the empty expression can match anywhere
                     self.advance();
                 }
+
+                self.match_cache.insert(
+                    self.match_cache
+                        .partition_point(|m| match_attempt.start > m.start),
+                    match_attempt.clone(),
+                );
+
+                if self.matches_substring_start.is_none() {
+                    self.matches_substring_start = Some(match_attempt.start);
+                }
+                self.matches_substring_end = match_attempt.end;
+
                 break;
             }
         }
