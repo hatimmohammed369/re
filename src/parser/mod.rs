@@ -69,9 +69,13 @@ impl Parser {
 
                         let tag = regexp.tag;
                         let pattern = regexp.pattern.clone();
-                        if pattern != self.scanner.get_source_string() {
+                        let source_pattern = self.scanner.get_source_string();
+                        if pattern != source_pattern {
                             eprintln!("FATAL ERROR:");
                             eprintln!("Parser made a mistake while building Regexp pattern");
+                            eprintln!("Built pattern : {pattern}");
+                            eprintln!("Source pattern: {source_pattern}");
+                            eprintln!();
                             panic!();
                         }
                         // parent is `None` because this `Regexp` is syntax tree root.
@@ -321,13 +325,17 @@ impl Parser {
                 // field `current` now points to the first character (or Empty token)
                 // after the closing )
 
+                // Consume group quantifier (if any)
+                let quantifier = self.consume_quantifier()?;
                 // Construct parsed grouped expression
-                let mut group = Regexp::new(ExpressionTag::Group {
-                    quantifier: self.consume_quantifier()?,
-                });
+                let mut group = Regexp::new(ExpressionTag::Group { quantifier });
                 // Surround parsed expression pattern with parentheses
                 // to create pattern of this group expression
-                group.pattern = format!("({})", parsed_expression.borrow().pattern);
+                group.pattern = {
+                    let parsed_expression_pattern = &parsed_expression.borrow().pattern;
+                    let group_quantifier = quantifier;
+                    format!("({parsed_expression_pattern}){group_quantifier}")
+                };
                 // let `group` take ownership of the expression it encloses
                 group.children.borrow_mut().push(parsed_expression);
                 // convert `group` to appropriate return type
