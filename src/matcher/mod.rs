@@ -57,6 +57,13 @@ struct ExpressionBacktrackInfo {
     // If it has no such sibling then its parent (a concatenation) fails to match
 }
 
+#[derive(Debug, Clone, Copy)]
+enum MatchPhase {
+    Normal,
+    TrailingEmptyString,
+    Finished,
+}
+
 // Coordinator of the matching process
 pub struct Matcher {
     // Currently processed node of the given pattern syntax tree
@@ -70,13 +77,7 @@ pub struct Matcher {
     // Current position in target string (Vec field `target`)
     pos: usize,
 
-    // True if Matcher generated match for the trailing empty string
-    // if field `pattern` can match the empty string
-    // False otherwise
-    // It's the guard keeping Matcher from infinitely matching the trailing empty string
-    // because if expression E can match the empty string
-    // then it can do so arbitrarily
-    matched_trailing_empty_string: bool,
+    next_match_phase: MatchPhase,
 
     // The last item in this Vec represent the index of current pattern among its siblings in
     // current syntax tree level
@@ -101,10 +102,6 @@ pub struct Matcher {
 
     // Target substring containing all matches end index
     matches_substring_end: usize,
-
-    // Did this Matcher consume the whole target?
-    // Once set it's never unset
-    consumed_target: bool,
 }
 
 impl Matcher {
@@ -114,25 +111,23 @@ impl Matcher {
         let pattern = parse(pattern)?;
         let target = target.chars().collect();
         let pos = 0;
-        let matched_trailing_empty_string = false;
+        let next_match_phase = MatchPhase::Normal;
         let pattern_index_sequence = vec![];
         let backtrack_table = vec![];
         let match_cache = vec![];
         let matches_substring_start = Option::<usize>::None;
         let matches_substring_end = 0;
-        let consumed_target = false;
 
         Ok(Matcher {
             pattern,
             target,
             pos,
-            matched_trailing_empty_string,
+            next_match_phase,
             pattern_index_sequence,
             backtrack_table,
             match_cache,
             matches_substring_start,
             matches_substring_end,
-            consumed_target,
         })
     }
 
@@ -173,8 +168,8 @@ impl Matcher {
     pub fn seek(&mut self, position: usize) {
         // Rewind
         self.set_position(position);
-        // You can match trailing empty string again
-        self.matched_trailing_empty_string = false;
+        // Back to normal matching mode (processing target)
+        self.next_match_phase = MatchPhase::Normal;
         // Stop tracking expressions
         self.pattern_index_sequence.clear();
         // Do not use old backtrack info
@@ -766,29 +761,35 @@ impl Iterator for Matcher {
         // Return Option::<std::ops::Range>::Some(...) on success
         // Return Option::<std::ops::Range>::None on failure
 
-        // Stop if Matcher matched the trailing empty string
-        // or it will loop forever because it can always match the trailing empty string
-        if self.pos > self.target.len() && self.matched_trailing_empty_string {
+        if matches!(self.next_match_phase, MatchPhase::Finished) {
             // Target is completely consumed
             // No more matches to compute
             return Option::<Match>::None;
         }
 
-        if self.pos >= self.target.len() {
-            // Assume that the trailing empty string is matched
-            // even if `self.pattern` can not match the empty string
-            self.matched_trailing_empty_string = true;
-            // In other words, do NOT attempt to match after this call of `next`
-            // just return Option::<Match>::None siganling end of iterator
-            self.consumed_target = true;
-        }
-
         if let Some(cached_range) = { self.match_cache.iter().find(|m| self.pos <= m.start) } {
-            self.pos = cached_range.end;
-            return Some(cached_range.clone());
-        }
+            let accept_cache = match self.next_match_phase {
+                MatchPhase::Normal => true,
+                MatchPhase::TrailingEmptyString => cached_range.is_empty(),
+                MatchPhase::Finished => false,
+            };
 
-        if self.consumed_target {
+            if accept_cache {
+                let old_pos = self.pos;
+                self.pos = cached_range.end;
+
+                self.next_match_phase = if self.pos < self.target.len() {
+                    MatchPhase::Normal
+                } else if old_pos < self.target.len() {
+                    MatchPhase::TrailingEmptyString
+                } else {
+                    MatchPhase::Finished
+                };
+
+                return Some(cached_range.clone());
+            }
+
+            self.next_match_phase = MatchPhase::Finished;
             return Option::<Match>::None;
         }
 
@@ -840,6 +841,14 @@ impl Iterator for Matcher {
                 break;
             }
         }
+
+        self.next_match_phase = match self.pos.cmp(&self.target.len()) {
+            std::cmp::Ordering::Less => MatchPhase::Normal,
+            _ => match self.next_match_phase {
+                MatchPhase::Normal => MatchPhase::TrailingEmptyString,
+                _ => MatchPhase::Finished,
+            },
+        };
 
         // Abandon root expression
         self.bubble_up();
