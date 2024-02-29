@@ -160,6 +160,21 @@ impl Matcher {
         self.reset();
     }
 
+    // Assign a new pattern to match against
+    pub fn assign_pattern_string(&mut self, pattern: &str) -> Result<(), String> {
+        self.pattern = parse(pattern)?;
+        self.match_cache.clear();
+        self.reset();
+        Ok(())
+    }
+
+    // Assign a new pattern to match against
+    pub fn assign_pattern_regexp(&mut self, regexp: &Regexp) {
+        self.pattern = regexp.deep_copy();
+        self.match_cache.clear();
+        self.reset();
+    }
+
     // Reset state and use old pattern
     pub fn reset(&mut self) {
         self.seek(0);
