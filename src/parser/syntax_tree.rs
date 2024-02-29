@@ -2,6 +2,7 @@
 
 use crate::scanner::tokens::*;
 use std::cell::RefCell;
+use std::collections::LinkedList;
 use std::fmt::Display;
 use std::rc::{Rc, Weak};
 
@@ -119,12 +120,71 @@ impl Regexp {
             children,
         }
     }
+
+    pub fn deep_copy(&self) -> Regexp {
+        // Copy expressions one level at a time
+        // Each a time iterate through children in order from first to last,
+        // copy the child itself then store its children for next iteration
+        // this way children of current expressions are also ordered
+        // because we iterate through children in order too
+        // repeat until all children in source Regexp have been copied
+        // in other words all levels copied, we copied last level
+        // which its expressions have no children
+        let mut source_children = LinkedList::from([Rc::new(RefCell::new(self.clone()))]);
+        let deep_copy = Rc::new(RefCell::new(Regexp {
+            tag: self.tag,
+            pattern: self.pattern.clone(),
+            parent: None,
+            children: RefCell::new(vec![]),
+        }));
+        let mut dest_children = LinkedList::from([Rc::clone(&deep_copy)]);
+
+        while !source_children.is_empty() {
+            let source_level_end = source_children.len();
+            for _ in 1..=source_level_end {
+                let source_child = source_children.pop_front().unwrap();
+                let source_child = RefCell::borrow(&source_child);
+
+                let source_child_offspring = source_child.children.borrow();
+                let source_child_offspring = source_child_offspring.iter().map(|kid| {
+                    source_children.push_back(Rc::clone(kid));
+                    RefCell::borrow(kid)
+                });
+
+                let dest_child = dest_children.pop_front().unwrap();
+                let dest_child_offspring = RefCell::borrow_mut(&dest_child);
+                let dest_child_offspring = &mut dest_child_offspring.children.borrow_mut();
+
+                for src_kid in source_child_offspring {
+                    let new_dest_child = {
+                        let tag = src_kid.tag;
+                        let parent = Some(Rc::downgrade(&dest_child));
+                        let pattern = src_kid.pattern.clone();
+                        let children = RefCell::new(vec![]);
+
+                        Rc::new(RefCell::new(Regexp {
+                            tag,
+                            parent,
+                            pattern,
+                            children,
+                        }))
+                    };
+
+                    dest_children.push_back(Rc::clone(&new_dest_child));
+                    dest_child_offspring.push(new_dest_child);
+                }
+            }
+        }
+
+        let deep_copy = RefCell::borrow(&deep_copy).clone();
+        deep_copy
+    }
 }
 
 impl Clone for Regexp {
     fn clone(&self) -> Self {
         let tag = self.tag;
-        let pattern = String::new();
+        let pattern = self.pattern.clone();
         let parent = self.parent.as_ref().map(Weak::clone);
         let children = RefCell::new(self.children.borrow().iter().map(Rc::clone).collect());
         Regexp {
