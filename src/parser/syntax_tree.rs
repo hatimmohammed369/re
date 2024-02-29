@@ -121,6 +121,33 @@ impl Regexp {
         }
     }
 
+    pub fn debug_as_strings(&self) -> String {
+        let mut debug = String::new();
+        debug.push_str("Regexp {\n");
+        let indent = "  "; // 2 spaces
+        debug.push_str(&format!("{indent}pattern: {},\n", self.pattern));
+
+        if let Some(parent) = &self.parent {
+            let parent = parent.upgrade().unwrap();
+            let parent = &RefCell::borrow(&parent).pattern;
+            debug.push_str(&format!("{indent}parent : {},\n", parent));
+        }
+
+        let children = self.children.borrow();
+        debug.push_str(&format!("{indent}children = {{"));
+        if !children.is_empty() {
+            debug.push('\n');
+            for child in children.iter() {
+                let child = &RefCell::borrow(child).pattern;
+                debug.push_str(&format!("{indent}{indent}{child},\n"));
+            }
+        }
+        debug.push_str(&format!("{indent}}},\n"));
+
+        debug.push('}');
+        debug
+    }
+
     pub fn deep_copy(&self) -> Regexp {
         // Copy expressions one level at a time
         // Each a time iterate through children in order from first to last,
