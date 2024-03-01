@@ -6,6 +6,8 @@ pub mod tokens;
 
 use tokens::{Token, TokenName::*};
 
+use crate::report_fatal_error;
+
 pub struct Scanner {
     // source string characters vector to allow fast access
     source: Vec<char>,
@@ -243,9 +245,7 @@ impl Iterator for Scanner {
             }
             '\\' => {
                 if (self.current + 1) >= self.source.len() {
-                    eprintln!("FATAL ERROR:");
-                    eprintln!("Unary operator slash \\ with no operand at end\n");
-                    panic!();
+                    report_fatal_error("Unary operator slash \\ with no operand at end\n");
                 }
 
                 if let next_char @ ('\\' | '(' | ')' | '|' | '?' | '*' | '+' | '.') =

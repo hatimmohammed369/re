@@ -4,8 +4,8 @@
 // Syntax tree structs
 pub mod syntax_tree;
 
-use crate::format_error;
 use crate::scanner::{tokens::*, Scanner};
+use crate::{format_error, report_fatal_error};
 use std::cell::RefCell;
 use std::rc::Rc;
 use syntax_tree::*;
@@ -71,12 +71,11 @@ impl Parser {
                         let pattern = regexp.pattern.clone();
                         let source_pattern = self.scanner.get_source_string();
                         if pattern != source_pattern {
-                            eprintln!("FATAL ERROR:");
-                            eprintln!("Parser made a mistake while building Regexp pattern");
-                            eprintln!("Built pattern : {pattern}");
-                            eprintln!("Source pattern: {source_pattern}");
-                            eprintln!();
-                            panic!();
+                            report_fatal_error(&format!(
+                                "Parser made a mistake while building Regexp pattern\n\
+                                Built pattern : {pattern}\n\
+                                Source pattern: {source_pattern}"
+                            ))
                         }
                         // parent is `None` because this `Regexp` is syntax tree root.
                         let parent = None;
@@ -104,12 +103,10 @@ impl Parser {
                         // Because even an empty source string has at least one
                         // token, namely Empty, thus we can parse a Regexp
                         // with its `tag` field set to ExpressionTag::EmptyExpression
-                        eprintln!("FATAL ERROR:");
-                        eprintln!(
+                        report_fatal_error(&format!(
                             "Could not parse source string `{}`\n",
                             self.scanner.get_source_string()
-                        );
-                        panic!()
+                        ))
                     }
                 }
             }

@@ -75,3 +75,9 @@ pub fn format_error(
 
     formatted_error
 }
+
+fn report_fatal_error(msg: &str) -> ! {
+    eprintln!("FATAL ERROR:");
+    eprintln!("{msg}");
+    panic!();
+}
