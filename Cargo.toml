@@ -1,0 +1,30 @@
+[package]
+name = "rust_regexps"
+version = "0.3.0"
+authors = ["Hatim Muhammed", "marshallriemann@gmail.com"]
+description = "A simple regular expressions library"
+repository = "https://github.com/hatimmohammed369/rust-regexps"
+publish = false
+edition = "2021"
+default-run = "rust_regexps"
+readme = "README.md"
+
+[[bin]]
+name = "matcher"
+path = "src/matcher/main.rs"
+test = false
+
+[[bin]]
+name = "parser"
+path = "src/parser/main.rs"
+test = false
+
+[[bin]]
+name = "scanner"
+path = "src/scanner/main.rs"
+test = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+lazy_static = "1.4.0"

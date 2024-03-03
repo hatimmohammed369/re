@@ -11,7 +11,7 @@ full-grammar
 *\#
 
 # ignore (vi/vim/nvim) swap files
-.swp
+.sw*
 
 # ignore binary main.rs which is mainly used to for testing code
 /src/main.rs
@@ -22,7 +22,3 @@ full-grammar
 /target
 
 /Cargo.lock
-
-# this package needs no other packages
-# and if needed we can remove this line
-/Cargo.toml
