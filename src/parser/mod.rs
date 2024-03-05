@@ -67,7 +67,7 @@ impl Parser {
                         // those counted references only increase their internal count when cloned
                         let regexp = regexp.borrow();
 
-                        let tag = regexp.tag;
+                        let tag = regexp.expression_type;
                         let pattern = regexp.pattern.clone();
                         let source_pattern = self.scanner.get_source_string();
                         if pattern != source_pattern {
@@ -91,7 +91,7 @@ impl Parser {
 
                         // Successfully parsed entire source string
                         Ok(Regexp {
-                            tag,
+                            expression_type: tag,
                             pattern,
                             parent,
                             children,
@@ -131,7 +131,7 @@ impl Parser {
                         // Attempt to parse an arbitrary expression
                         // But do that attempt to parse an alternation expression
                         // because alternation has the lowest precedence of all regular expressions operations
-                        let mut alternation = Regexp::new(ExpressionTag::Alternation);
+                        let mut alternation = Regexp::new(ExpressionType::Alternation);
 
                         // First, attempt to parse one concatenation
                         if let Some(concatenation) = self.parse_concatenation()? {
@@ -226,7 +226,7 @@ impl Parser {
     fn parse_concatenation(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
         // Attempt to parse a concatenation of regular expressions
 
-        let mut concatenation = Regexp::new(ExpressionTag::Concatenation);
+        let mut concatenation = Regexp::new(ExpressionType::Concatenation);
         while let Some(primary_expression) = self.parse_primary()? {
             // Parsed a new expression
             // Append its pattern
@@ -325,7 +325,7 @@ impl Parser {
                 // Consume group quantifier (if any)
                 let quantifier = self.consume_quantifier()?;
                 // Construct parsed grouped expression
-                let mut group = Regexp::new(ExpressionTag::Group { quantifier });
+                let mut group = Regexp::new(ExpressionType::Group { quantifier });
                 // Surround parsed expression pattern with parentheses
                 // to create pattern of this group expression
                 group.pattern = {
@@ -387,7 +387,7 @@ impl Parser {
         // Empty token because the scanner never generates
         // two or more Empty tokens in row
 
-        let mut expr = Regexp::new(ExpressionTag::EmptyExpression);
+        let mut expr = Regexp::new(ExpressionType::EmptyExpression);
         // Empty string pattern for the empty expression
         expr.pattern = String::new();
 
@@ -402,7 +402,7 @@ impl Parser {
 
         let value = None;
         let quantifier = self.consume_quantifier()?;
-        let mut expr = Regexp::new(ExpressionTag::CharacterExpression { value, quantifier });
+        let mut expr = Regexp::new(ExpressionType::CharacterExpression { value, quantifier });
         // A dot for dot expressions succeeded with a quantifier (if any)
         expr.pattern = format!(".{quantifier}");
 
@@ -420,7 +420,7 @@ impl Parser {
 
         let value = Some(value);
         let quantifier = self.consume_quantifier()?;
-        let mut expr = Regexp::new(ExpressionTag::CharacterExpression { value, quantifier });
+        let mut expr = Regexp::new(ExpressionType::CharacterExpression { value, quantifier });
 
         // Use given character for this character expression succeeded with a quantifier (if any)
         let value = value.unwrap();

@@ -196,12 +196,12 @@ impl Matcher {
         // 1 - It's quantified, in other words it's succeeded by a quantifier, like `.*`
         // 2 - At least one of its children supports backtracking, like `(a+|c)` because a+ can backtrack
 
-        match &expr.tag {
+        match &expr.expression_type {
             // The empty expression can match anywhere
             // It doesn't need backtracking
-            ExpressionTag::EmptyExpression => false,
+            ExpressionType::EmptyExpression => false,
 
-            ExpressionTag::CharacterExpression { quantifier, .. } => {
+            ExpressionType::CharacterExpression { quantifier, .. } => {
                 // . or x are quantified
 
                 // It's not the case that this expression has no quantifier
@@ -210,7 +210,7 @@ impl Matcher {
                 // Variant Quantifier::None represent the idea of `no quantifier`
             }
 
-            ExpressionTag::Group { quantifier } => {
+            ExpressionType::Group { quantifier } => {
                 // The group itself is quantified or the grouped expression
                 // inside supports backtracking
 
@@ -234,17 +234,17 @@ impl Matcher {
 
     // ALL EXPRESSIONS MUST RESTORE OLD POSITION WHEN FAILING TO MATCH
     fn compute_match(&mut self) -> Option<Match> {
-        let computed_match = match self.pattern.tag {
-            ExpressionTag::EmptyExpression => self.empty_expression_match(),
+        let computed_match = match self.pattern.expression_type {
+            ExpressionType::EmptyExpression => self.empty_expression_match(),
 
-            ExpressionTag::CharacterExpression { value, quantifier } => {
+            ExpressionType::CharacterExpression { value, quantifier } => {
                 self.character_expression_match(value, quantifier)
             }
 
-            ExpressionTag::Group { quantifier } => self.group_match(quantifier),
+            ExpressionType::Group { quantifier } => self.group_match(quantifier),
 
-            ExpressionTag::Alternation => self.alternation_match(),
-            ExpressionTag::Concatenation => self.concatenation_match(),
+            ExpressionType::Alternation => self.alternation_match(),
+            ExpressionType::Concatenation => self.concatenation_match(),
         };
 
         // If current expression successfully matched AND

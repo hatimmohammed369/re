@@ -44,7 +44,7 @@ impl Display for Quantifier {
 }
 // Expression type
 #[derive(Debug, Clone, Copy)]
-pub enum ExpressionTag {
+pub enum ExpressionType {
     // Empty string expression
     // the expression between ( and ) in string `()`
     // or between ( and | and ) in string `(|)
@@ -79,7 +79,7 @@ pub enum ExpressionTag {
 #[derive(Debug)]
 pub struct Regexp {
     // -- Which expression this wrapper contains
-    pub tag: ExpressionTag,
+    pub expression_type: ExpressionType,
 
     // Pattern of this (sub)expression
     pub pattern: String,
@@ -109,12 +109,12 @@ pub struct Regexp {
 // the object tag field rather than using `ExpressionTag::EmptyExpression`
 // as a default tag, and still gives an `initialized` object
 impl Regexp {
-    pub fn new(tag: ExpressionTag) -> Self {
+    pub fn new(tag: ExpressionType) -> Self {
         let pattern = String::new();
         let parent = None;
         let children = RefCell::new(vec![]);
         Regexp {
-            tag,
+            expression_type: tag,
             pattern,
             parent,
             children,
@@ -159,7 +159,7 @@ impl Regexp {
         // which its expressions have no children
         let mut source_children = LinkedList::from([Rc::new(RefCell::new(self.clone()))]);
         let deep_copy = Rc::new(RefCell::new(Regexp {
-            tag: self.tag,
+            expression_type: self.expression_type,
             pattern: self.pattern.clone(),
             parent: None,
             children: RefCell::new(vec![]),
@@ -184,13 +184,13 @@ impl Regexp {
 
                 for src_kid in source_child_offspring {
                     let new_dest_child = {
-                        let tag = src_kid.tag;
+                        let tag = src_kid.expression_type;
                         let parent = Some(Rc::downgrade(&dest_child));
                         let pattern = src_kid.pattern.clone();
                         let children = RefCell::new(vec![]);
 
                         Rc::new(RefCell::new(Regexp {
-                            tag,
+                            expression_type: tag,
                             parent,
                             pattern,
                             children,
@@ -210,12 +210,12 @@ impl Regexp {
 
 impl Clone for Regexp {
     fn clone(&self) -> Self {
-        let tag = self.tag;
+        let tag = self.expression_type;
         let pattern = self.pattern.clone();
         let parent = self.parent.as_ref().map(Weak::clone);
         let children = RefCell::new(self.children.borrow().iter().map(Rc::clone).collect());
         Regexp {
-            tag,
+            expression_type: tag,
             pattern,
             parent,
             children,
