@@ -208,11 +208,7 @@ impl Iterator for Scanner {
         // By default assume the current character is an ordinary character
         // (not a metacharacter and not an escaped metacharacter)
         let mut next = Some(Token {
-            name: Character {
-                value: peek,
-                // Assume token to be generated is not an escaped metacharacter
-                is_escaped_metacharacter: false,
-            },
+            name: Character { value: peek },
             position: self.current,
         });
 
@@ -259,15 +255,9 @@ impl Iterator for Scanner {
                     // Advance to consume the following (escaped by slash in `peek`) metacharacter
                     self.advance();
 
-                    if let Character {
-                        value,
-                        is_escaped_metacharacter,
-                    } = &mut next_token.name
-                    {
+                    if let Character { value } = &mut next_token.name {
                         // Token data is the escaped metacharacter, not the slash in `peek`
                         *value = next_char;
-                        // Yes, this `next_char` is an escaped metacharacter
-                        *is_escaped_metacharacter = true;
                     }
                 }
             }

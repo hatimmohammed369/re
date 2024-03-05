@@ -1,4 +1,4 @@
-// disable some annoying warnings
+//(x \ x? \ x* \ x+) disable some annoying warnings
 #[allow(dead_code)]
 #[allow(clippy::let_and_return)]
 // enable pretty-printing if needed
@@ -18,13 +18,7 @@ pub enum TokenName {
     // "...(...|)..." between | and )
     // "...()..." between ( and )
     Empty,
-    // a non-metacharacter and not an escaped metacharacter
-    Character {
-        value: char,
-        // True when Token object wrapping this `TokenName::Character`
-        // points to an escaped metacharacter (like \+) in the source string
-        is_escaped_metacharacter: bool,
-    },
+    Character { value: char },
 
     // *METACHARACTERS
     LeftParen,  // (
