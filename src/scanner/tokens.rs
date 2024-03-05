@@ -3,7 +3,7 @@
 #[allow(clippy::let_and_return)]
 // enable pretty-printing if needed
 #[derive(Debug, PartialEq, Clone)]
-pub enum TokenName {
+pub enum TokenType {
     // Token types (names)
     // When we say `an Empty token` we mean a Token object
     // whose `name` field is set to `TokenName::Empty`
@@ -41,7 +41,7 @@ pub enum TokenName {
 #[derive(Debug)]
 pub struct Token {
     // What kind this token is?
-    pub name: TokenName,
+    pub type_name: TokenType,
     // index in source string
     pub position: usize,
 }

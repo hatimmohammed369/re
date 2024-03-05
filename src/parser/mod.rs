@@ -122,12 +122,12 @@ impl Parser {
             }
             Some(token) => {
                 // There are unprocessed tokens
-                match token.name {
+                match token.type_name {
                     // This token can begin a valid expression
-                    TokenName::Empty
-                    | TokenName::Dot { .. }
-                    | TokenName::Character { .. }
-                    | TokenName::LeftParen => {
+                    TokenType::Empty
+                    | TokenType::Dot { .. }
+                    | TokenType::Character { .. }
+                    | TokenType::LeftParen => {
                         // Attempt to parse an arbitrary expression
                         // But do that attempt to parse an alternation expression
                         // because alternation has the lowest precedence of all regular expressions operations
@@ -143,7 +143,7 @@ impl Parser {
                             alternation.children.borrow_mut().push(concatenation);
 
                             // As long as current token is |, keep parsing concatenations
-                            while self.check(TokenName::Pipe) {
+                            while self.check(TokenType::Pipe) {
                                 // Move past current |
                                 self.advance()?;
                                 if let Some(expression) = self.parse_concatenation()? {
@@ -284,11 +284,11 @@ impl Parser {
 
         match &self.current.as_ref() {
             Some(token) => {
-                match &token.name {
-                    TokenName::Empty => self.parse_empty_expression(),
-                    TokenName::Dot => self.parse_dot_expression(),
-                    TokenName::Character { value, .. } => self.parse_character_expression(*value),
-                    TokenName::LeftParen => self.parse_group(),
+                match &token.type_name {
+                    TokenType::Empty => self.parse_empty_expression(),
+                    TokenType::Dot => self.parse_dot_expression(),
+                    TokenType::Character { value, .. } => self.parse_character_expression(*value),
+                    TokenType::LeftParen => self.parse_group(),
                     _ => Ok(None), // Current token can begin a valid expression
                 }
             }
@@ -318,7 +318,7 @@ impl Parser {
 
                 // Advance only when current item has name TokenName::RightParent
                 // or report error `Expected ) after expression` (? operator)
-                self.consume(TokenName::RightParen, "Expected ) after expression")?;
+                self.consume(TokenType::RightParen, "Expected ) after expression")?;
                 // field `current` now points to the first character (or Empty token)
                 // after the closing )
 
@@ -433,7 +433,7 @@ impl Parser {
     // Read next token in stream
     fn advance(&mut self) -> Result<(), String> {
         self.current = self.scanner.next();
-        if self.check(TokenName::RightParen) && self.grouping_marks.pop().is_none() {
+        if self.check(TokenType::RightParen) && self.grouping_marks.pop().is_none() {
             // There is no group expression currently processed
             // Thus ) was used without its matching (
             // Syntax error!
@@ -461,7 +461,7 @@ impl Parser {
                 Or, you can use a raw string r\"\\\\\"",
             ));
         }
-        if self.check(TokenName::LeftParen) {
+        if self.check(TokenType::LeftParen) {
             // The parser has found a possibly opening (
             // Note the word `possibly`, if pattern ends with a matching )
             // then the parser will report a syntax error
@@ -475,9 +475,9 @@ impl Parser {
     }
 
     // Check if current token (if any) has a given type
-    fn check(&self, expected: TokenName) -> bool {
+    fn check(&self, expected: TokenType) -> bool {
         match &self.current {
-            Some(token) => token.name == expected,
+            Some(token) => token.type_name == expected,
             None => false,
         }
     }
@@ -485,7 +485,7 @@ impl Parser {
     // Check if current token (if any) has a given type
     // if true then advance
     // if false report `error`
-    fn consume(&mut self, expected: TokenName, error: &str) -> Result<(), String> {
+    fn consume(&mut self, expected: TokenType, error: &str) -> Result<(), String> {
         if !self.check(expected) {
             // current token name (type) is not what was expected
             // in other words, grammar requires a specific item to appear here

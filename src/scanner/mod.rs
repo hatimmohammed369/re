@@ -4,7 +4,7 @@
 #[allow(dead_code)]
 pub mod tokens;
 
-use tokens::{Token, TokenName::*};
+use tokens::{Token, TokenType::*};
 
 use crate::report_fatal_error;
 
@@ -171,7 +171,7 @@ impl Iterator for Scanner {
                 // instead we set flag (found_empty_string) so
                 // next time call `next` we do not visit this branch again
                 return Some(Token {
-                    name: Empty,
+                    type_name: Empty,
                     position: self.current,
                 });
             }
@@ -208,7 +208,7 @@ impl Iterator for Scanner {
         // By default assume the current character is an ordinary character
         // (not a metacharacter and not an escaped metacharacter)
         let mut next = Some(Token {
-            name: Character { value: peek },
+            type_name: Character { value: peek },
             position: self.current,
         });
 
@@ -219,25 +219,25 @@ impl Iterator for Scanner {
 
         match peek {
             '(' => {
-                next_token.name = LeftParen;
+                next_token.type_name = LeftParen;
             }
             ')' => {
-                next_token.name = RightParen;
+                next_token.type_name = RightParen;
             }
             '|' => {
-                next_token.name = Pipe;
+                next_token.type_name = Pipe;
             }
             '?' => {
-                next_token.name = Mark;
+                next_token.type_name = Mark;
             }
             '*' => {
-                next_token.name = Star;
+                next_token.type_name = Star;
             }
             '+' => {
-                next_token.name = Plus;
+                next_token.type_name = Plus;
             }
             '.' => {
-                next_token.name = Dot;
+                next_token.type_name = Dot;
             }
             '\\' => {
                 if (self.current + 1) >= self.source.len() {
@@ -255,7 +255,7 @@ impl Iterator for Scanner {
                     // Advance to consume the following (escaped by slash in `peek`) metacharacter
                     self.advance();
 
-                    if let Character { value } = &mut next_token.name {
+                    if let Character { value } = &mut next_token.type_name {
                         // Token data is the escaped metacharacter, not the slash in `peek`
                         *value = next_char;
                     }

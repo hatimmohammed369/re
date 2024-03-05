@@ -19,10 +19,10 @@ impl From<&Option<Token>> for Quantifier {
         match token {
             Some(tok) => {
                 // I do not want `cargo fmt` remove the outer block
-                match tok.name {
-                    TokenName::Mark => Quantifier::ZeroOrOne,
-                    TokenName::Star => Quantifier::ZeroOrMore,
-                    TokenName::Plus => Quantifier::OneOrMore,
+                match tok.type_name {
+                    TokenType::Mark => Quantifier::ZeroOrOne,
+                    TokenType::Star => Quantifier::ZeroOrMore,
+                    TokenType::Plus => Quantifier::OneOrMore,
                     _ => Quantifier::None,
                 }
             }
