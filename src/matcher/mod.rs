@@ -404,17 +404,29 @@ impl Matcher {
             }
         };
 
+        // If value is Option::<char>::None, then this expression is actually
+        // a dot expression (. \ .? \ .* \ .+) no need to do character checking
+        // just set Match field `pos` to local `match_bound`
+
         let start = self.current();
-        // Consume characters as long as there are unmatched characters
-        // only if this expression is a dot expression or the next unmatched
-        // character is `x` and this expression is one of: x \ x? \ x* \ x+
-        while self.has_next() // Ensure self.pos is in bounds of Vec self.target
-            && self.pos < match_bound // Ensure match NEVER exceeds its bound
-            // Consume characters anyway or stop if the given character is NOT in current position
-            && !(value.is_some() && self.target[self.pos] != value.unwrap())
-        {
-            self.advance();
-        }
+        match value {
+            Some(char_value) => {
+                // This is a character expression
+                // Stop at the first position not containing `char_value`
+                while let Some(read_char) = self.target.get(self.pos) {
+                    if *read_char == char_value && self.pos < match_bound {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            None => {
+                // This is a dot expression
+                // Set Matcher field `pos` to `match_bound`
+                self.set_position(match_bound);
+            }
+        };
         let end = self.current();
 
         if start == end {
