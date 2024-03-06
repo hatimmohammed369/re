@@ -1,3 +1,33 @@
+/*!
+This crate provides a rudimentary set of [regular expressions] routines
+
+[regular expressions]: https://en.wikipedia.org/wiki/Regular_expression
+
+For a more mature, features rich crate look up [regex](https://crates.io/crates/regex) crate by [Andrew Gallant](https://blog.burntsushi.net)
+
+As I said this crate is still under developemnet. Supported syntax is merely that of (theoretical) regular expressions except you can use `+` (one or more repetition) and `?` (zero or one occurence = optional)
+
+Here is how you can use a regular expression:
+```
+use regexps::matcher::Matcher;
+
+let pattern = "(a|b|c)+"; // pattern (regular expression);
+let target = "XXXabcYYYcbbZZZbcb000cab"; // String to be searched
+
+let mut matcher = match Matcher::new(pattern, target) {
+    Ok(m) => m,
+    Err(e) => {
+        eprintln!("{e}");
+        panic!();
+    }
+};
+
+assert_eq!(matcher.split(), vec!["XXX", "YYY", "ZZZ", "000", ""]);
+// Last item is "" because there are no characters after "cab"
+// which is last substring matching pattern "(a|b|c)+"
+```
+*/
+
 // Scanner module
 // Take the source pattern string and generate tokens as needed
 pub mod scanner;
