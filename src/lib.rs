@@ -26,6 +26,15 @@ assert_eq!(matcher.split(), vec!["XXX", "YYY", "ZZZ", "000", ""]);
 // Last item is "" because there are no characters after "cab"
 // which is last substring matching pattern "(a|b|c)+"
 ```
+
+###### Contents
+------
+- [How a regular expression is built](#how-a-regular-expression-is-built)
+- [How to use a regular expression](#how-to-use-a-regular-expression)
+- [Examples](#examples)
+- [Modules](#modules)
+- [Functions](#functions)
+
 ------
 
 ###### How a regular expression is built
@@ -52,6 +61,26 @@ that group it attempts to parse an alternation following the same manner above
 If it succeeded it returns a syntax tree object named <code>[Regexp]</code>
 
 [Regexp]: parser::syntax_tree::Regexp
+
+------
+
+###### How to use a regular expression
+
+To find matches a regular expression (also a `pattern`) you create a new <code>[Matcher]</code> which searches your `target string` from left to right reporting all *non-overlapping matches*.
+
+<code>[Matcher]</code> implements [`std::iter::Iterator`] which means you can use it in `for` loop pretty much like a [`Vec`]
+
+- Your <code>[Matcher]</code> needs to have type `mut Matcher`
+
+You can create a <code>[Matcher]</code> using its factory method [`Matcher::new`] supplying two arguments:
+- **First argument**: regular expression, `pattern`, as a string (`&str`)
+- **Second argument**: `target string` to be searched
+
+[`Matcher::new`]: matcher::Matcher::new
+
+<code>[Matcher]</code> gives you matching ranges [`std::ops::Range`], in other words it gives you ***start and end index*** of each matching substring in your `target string`
+
+[Matcher]: matcher::Matcher
 
 ------
 */
