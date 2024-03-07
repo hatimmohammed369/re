@@ -483,6 +483,12 @@ impl Matcher {
             // Thus calling `self.dive()` before computing `match_bound` makes the search
             // in `self.backtrack_table` always fail
 
+            if let Quantifier::None = quantifier {
+                // This group is NOT quantified (`(a)` for instance)
+                // return whatever match its inner expression returns
+                return self.compute_match();
+            }
+
             // A guard to stop matching if inner expression matched the empty string at least once
             // so that Matcher does not loop endlessly matching the empty string at current position
             let mut matched_empty_string = false;
@@ -518,8 +524,13 @@ impl Matcher {
             if start == end && !matched_empty_string {
                 // Total failure
                 match quantifier {
-                    // E failed, then so would (E) and (E)+
-                    Quantifier::None | Quantifier::OneOrMore => Option::<Match>::None,
+                    // Handled above
+                    Quantifier::None => {
+                        unreachable!();
+                    }
+
+                    // E failed, then so would (E)+
+                    Quantifier::OneOrMore => Option::<Match>::None,
 
                     // E failed, then (E)? and (E)* match the empty string
                     _ => self.empty_expression_match(),
