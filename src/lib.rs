@@ -26,6 +26,34 @@ assert_eq!(matcher.split(), vec!["XXX", "YYY", "ZZZ", "000", ""]);
 // Last item is "" because there are no characters after "cab"
 // which is last substring matching pattern "(a|b|c)+"
 ```
+------
+
+###### How a regular expression is built
+
+Let's take an example, given string `(a|b|c)+`:
+
+- step 1: <code>[Scanner]</code> transforms `(a|b|c)+` into parts:
+
+[Scanner]: scanner::Scanner
+
+`(` / `a` / `|` / `b` / `|` / `c` / `)` / `+`
+
+- step 2: <code>[Parser]</code> always tries to parse an alternation (like above expression),
+when it fails it returns parsed expression (if any) as a concatenation (such as `abc`)
+
+[Parser]: parser::Parser
+
+In doing so, it attempts to parse **elementary** expressions like
+`a`, `(a)`, `a+`, `.` and such.
+
+Once observing the leading `(` it tries to parse a group and again inside
+that group it attempts to parse an alternation following the same manner above
+
+If it succeeded it returns a syntax tree object named <code>[Regexp]</code>
+
+[Regexp]: parser::syntax_tree::Regexp
+
+------
 */
 
 // Scanner module
