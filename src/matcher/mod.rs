@@ -370,78 +370,72 @@ impl Matcher {
         value: Option<char>,
         quantifier: Quantifier,
     ) -> Option<Match> {
-        // Choose match bound (where the match ends, exclusive of course)
-        // A non-backtracking expression (`.` or `x`) gets bound (self.current + 1)
-        // For any other expression subtract one (if possible, if not use 0) from field `last_match_end`
-        // found in its associated entry (ExpressionBacktrackInfo object) in self.backtrack_table
         let match_bound = {
-            // Find backtrack table entry of this expression
-            // Expressions `.` and `x` DO NOT have such entries, NEVER
-            // If they do, it MUST be a bug in function Self::supports_backtracking
-            let table_entry = self.backtrack_table.iter().find(|entry| {
-                // Grab entry whose index sequence matches that of currently processed pattern
-                entry.index_sequence == self.pattern_index_sequence
-            });
+            // `match_bound` is EXCLUSIVE, so we stop if `self.pos >= match_bound`
+
+            // Find backtrack entry (in self.backtrack_table) of this character/dot expression
+            let table_entry = self
+                .backtrack_table
+                .iter()
+                .find(|entry| entry.index_sequence == self.pattern_index_sequence);
             match table_entry {
-                // This expression can backtrack (a quantified `.` or `x`, for instance `.+`)
-                // AND also it has a backtrack table entry
-                // Use its `last_match_end` to force it to match a smaller range
-                Some(info) => info.last_match_end.saturating_sub(1),
-
+                // This expression matched/backtracked before
+                Some(info) => {
+                    // Subtract one, if possible, from last match end index
+                    // to force this expression to match a smaller range
+                    info.last_match_end.saturating_sub(1)
+                }
+                // This expression NEVER matched/backtracked before
                 None => {
-                    // This expression NEVER matched before
-                    // OR it does not support backtracking (like `x` or `.`)
-                    match quantifier {
-                        // Expressions `.` and `x`
-                        // Consume exactly one character
-                        Quantifier::None | Quantifier::ZeroOrOne => self.pos + 1,
-
-                        // Quantified `.` or `x`
-                        // Consume as many characters as possible
-                        _ => self.target.len(),
-                    }
+                    // Add one so this expression can make match
+                    // up to target end consuming all remaining characters
+                    self.target.len() + 1
                 }
             }
         };
 
-        // If value is Option::<char>::None, then this expression is actually
-        // a dot expression (. \ .? \ .* \ .+) no need to do character checking
-        // just set Match field `pos` to local `match_bound`
+        match quantifier {
+            Quantifier::None | Quantifier::ZeroOrOne => {
+                // Match `x`\`x?` (value = Some('x')) or `.`\`.?` (value = None)
+                if self.has_next() && (value.is_none() || self.target[self.pos] == value.unwrap()) {
+                    Option::<Match>::Some(Match {
+                        start: self.current(),
+                        end: {
+                            self.advance();
+                            self.current()
+                        },
+                    })
+                } else if matches!(quantifier, Quantifier::None) {
+                    Option::<Match>::None
+                } else {
+                    self.empty_expression_match()
+                }
+            }
 
-        let start = self.current();
-        match value {
-            Some(char_value) => {
-                // This is a character expression
-                // Stop at the first position not containing `char_value`
-                while let Some(read_char) = self.target.get(self.pos) {
-                    if *read_char == char_value && self.pos < match_bound {
+            _ => {
+                // Match `x*` \ `x+` (value = Some('x')) or `.*` \ `.+` (value = None)
+                let start = self.current();
+                if value.is_none() {
+                    self.set_position(match_bound);
+                } else {
+                    let value = value.unwrap();
+                    while let Some(target_char) = self.target.get(self.pos) {
+                        if *target_char != value || self.pos >= match_bound {
+                            break;
+                        }
                         self.advance();
-                    } else {
-                        break;
                     }
                 }
-            }
-            None => {
-                // This is a dot expression
-                // Set Matcher field `pos` to `match_bound`
-                self.set_position(match_bound);
-            }
-        };
-        let end = self.current();
+                let end = self.current();
 
-        if start == end {
-            // Empty range
-            match quantifier {
-                // Expressions . \ .+ \ x \ x+ MUST match at least one character
-                // They fail if they `matched` an empty range
-                Quantifier::None | Quantifier::OneOrMore => Option::<Match>::None,
-
-                // Expressions .? \ .* \ x? \ x* match the empty string
-                // when they fail to match at least one character
-                _ => self.empty_expression_match(),
+                if start < end {
+                    Option::<Match>::Some(Match { start, end })
+                } else if matches!(quantifier, Quantifier::ZeroOrMore) {
+                    self.empty_expression_match()
+                } else {
+                    Option::<Match>::None
+                }
             }
-        } else {
-            Some(Match { start, end })
         }
     }
 
