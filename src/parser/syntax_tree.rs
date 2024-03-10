@@ -77,7 +77,7 @@ pub enum ExpressionType {
 
 // (Wrapper) Expression objects after parsing
 #[derive(Debug)]
-pub struct Regexp {
+pub struct ParsedRegexp {
     // -- Which expression this wrapper contains
     pub expression_type: ExpressionType,
 
@@ -92,28 +92,28 @@ pub struct Regexp {
     // * Field `parent` is Option because syntax tree root has no parent
     // * We use a RefCell to allow interior mutability in case
     // `parent` needed to modify is data
-    pub parent: Option<Weak<RefCell<Regexp>>>,
+    pub parent: Option<Weak<RefCell<ParsedRegexp>>>,
 
     // -- Children expressions of this object
     // * We use RefCell to allow interior mutability
     // in case we needed to modify Vec `children`
     // or a particular child needs to be modified
     // * We use Rc because Expressions are always shared
-    // there is no object which owns an `Regexp`
-    // * We use RefCell<Regexp> to allow interior mutability
-    // in case an `Regexp` needs to be modified
-    pub children: RefCell<Vec<Rc<RefCell<Regexp>>>>,
+    // there is no object which owns an `ParsedRegexp`
+    // * We use RefCell<ParsedRegexp> to allow interior mutability
+    // in case an `ParsedRegexp` needs to be modified
+    pub children: RefCell<Vec<Rc<RefCell<ParsedRegexp>>>>,
 }
 
 // Replace `Default` trait with a constructor which at least initializes
 // the object tag field rather than using `ExpressionTag::EmptyExpression`
 // as a default tag, and still gives an `initialized` object
-impl Regexp {
+impl ParsedRegexp {
     pub fn new(tag: ExpressionType) -> Self {
         let pattern = String::new();
         let parent = None;
         let children = RefCell::new(vec![]);
-        Regexp {
+        ParsedRegexp {
             expression_type: tag,
             pattern,
             parent,
@@ -123,7 +123,7 @@ impl Regexp {
 
     pub fn debug_as_strings(&self) -> String {
         let mut debug = String::new();
-        debug.push_str("Regexp {\n");
+        debug.push_str("ParsedRegexp {\n");
         let indent = "  "; // 2 spaces
         debug.push_str(&format!("{indent}pattern: {},\n", self.pattern));
 
@@ -148,17 +148,17 @@ impl Regexp {
         debug
     }
 
-    pub fn deep_copy(&self) -> Regexp {
+    pub fn deep_copy(&self) -> ParsedRegexp {
         // Copy expressions one level at a time
         // Each a time iterate through children in order from first to last,
         // copy the child itself then store its children for next iteration
         // this way children of current expressions are also ordered
         // because we iterate through children in order too
-        // repeat until all children in source Regexp have been copied
+        // repeat until all children in source ParsedRegexp have been copied
         // in other words all levels copied, we copied last level
         // which its expressions have no children
         let mut source_children = LinkedList::from([Rc::new(RefCell::new(self.clone()))]);
-        let deep_copy = Rc::new(RefCell::new(Regexp {
+        let deep_copy = Rc::new(RefCell::new(ParsedRegexp {
             expression_type: self.expression_type,
             pattern: self.pattern.clone(),
             parent: None,
@@ -189,7 +189,7 @@ impl Regexp {
                         let pattern = src_kid.pattern.clone();
                         let children = RefCell::new(vec![]);
 
-                        Rc::new(RefCell::new(Regexp {
+                        Rc::new(RefCell::new(ParsedRegexp {
                             expression_type: tag,
                             parent,
                             pattern,
@@ -208,13 +208,13 @@ impl Regexp {
     }
 }
 
-impl Clone for Regexp {
+impl Clone for ParsedRegexp {
     fn clone(&self) -> Self {
         let tag = self.expression_type;
         let pattern = self.pattern.clone();
         let parent = self.parent.as_ref().map(Weak::clone);
         let children = RefCell::new(self.children.borrow().iter().map(Rc::clone).collect());
-        Regexp {
+        ParsedRegexp {
             expression_type: tag,
             pattern,
             parent,
@@ -223,7 +223,7 @@ impl Clone for Regexp {
     }
 }
 
-impl Display for Regexp {
+impl Display for ParsedRegexp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.pattern)
     }

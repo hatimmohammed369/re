@@ -58,9 +58,9 @@ In doing so, it attempts to parse **elementary** expressions like
 Once observing the leading `(` it tries to parse a group and again inside
 that group it attempts to parse an alternation following the same manner above
 
-If it succeeded it returns a syntax tree object named <code>[Regexp]</code>
+If it succeeded it returns a syntax tree object named <code>[ParsedRegexp]</code>
 
-[Regexp]: parser::syntax_tree::Regexp
+[ParsedRegexp]: parser::syntax_tree::ParsedRegexp
 
 ------
 

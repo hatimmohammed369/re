@@ -46,7 +46,7 @@ impl Parser {
     }
 
     // Attempt to parse source string
-    fn parse_source(&mut self) -> Result<Regexp, String> {
+    fn parse_source(&mut self) -> Result<ParsedRegexp, String> {
         // Grab the first token in stream
         self.advance()?;
         match self.parse_expression() {
@@ -55,10 +55,10 @@ impl Parser {
 
             // Successfully parsed source string
             Ok(option_regexp) => {
-                // `option_regexp` has type Option<Rc<RefCell<Regexp>>>
+                // `option_regexp` has type Option<Rc<RefCell<ParsedRegexp>>>
                 match option_regexp {
                     Some(regexp) => {
-                        // When done parsing, take the resulting `Regexp`
+                        // When done parsing, take the resulting `ParsedRegexp`
                         // and clone (shallow copy) its data
                         // - Field `tag` holds data local to expression (namely its type)
                         // and also it's easily clone
@@ -72,12 +72,12 @@ impl Parser {
                         let source_pattern = self.scanner.get_source_string();
                         if pattern != source_pattern {
                             report_fatal_error(&format!(
-                                "Parser made a mistake while building Regexp pattern\n\
+                                "Parser made a mistake while building ParsedRegexp pattern\n\
                                 Built pattern : {pattern}\n\
                                 Source pattern: {source_pattern}"
                             ))
                         }
-                        // parent is `None` because this `Regexp` is syntax tree root.
+                        // parent is `None` because this `ParsedRegexp` is syntax tree root.
                         let parent = None;
                         // Clone Rc's which is merely increasing internal reference count
                         let children = RefCell::new(
@@ -90,7 +90,7 @@ impl Parser {
                         );
 
                         // Successfully parsed entire source string
-                        Ok(Regexp {
+                        Ok(ParsedRegexp {
                             expression_type: tag,
                             pattern,
                             parent,
@@ -101,7 +101,7 @@ impl Parser {
                         // Could not parse source string for some unknown reason
                         // maybe a bug in code
                         // Because even an empty source string has at least one
-                        // token, namely Empty, thus we can parse a Regexp
+                        // token, namely Empty, thus we can parse a ParsedRegexp
                         // with its `tag` field set to ExpressionTag::EmptyExpression
                         report_fatal_error(&format!(
                             "Could not parse source string `{}`\n",
@@ -113,8 +113,8 @@ impl Parser {
         }
     }
 
-    // Regexp => Concatenation ( "|" Concatenation )*
-    fn parse_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+    // ParsedRegexp => Concatenation ( "|" Concatenation )*
+    fn parse_expression(&mut self) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
         match &self.current {
             None => {
                 // Reached end of input, no expression can be parsed
@@ -131,7 +131,7 @@ impl Parser {
                         // Attempt to parse an arbitrary expression
                         // But do that attempt to parse an alternation expression
                         // because alternation has the lowest precedence of all regular expressions operations
-                        let mut alternation = Regexp::new(ExpressionType::Alternation);
+                        let mut alternation = ParsedRegexp::new(ExpressionType::Alternation);
 
                         // First, attempt to parse one concatenation
                         if let Some(concatenation) = self.parse_concatenation()? {
@@ -179,7 +179,7 @@ impl Parser {
 
                                 // At least two expressions were parsed
                                 // Composed an alternation expression
-                                // Its children are already inside it, in Regexp field `children`
+                                // Its children are already inside it, in ParsedRegexp field `children`
                                 let alternation = Rc::new(RefCell::new(alternation));
                                 alternation
                                     .borrow_mut()
@@ -223,10 +223,10 @@ impl Parser {
     }
 
     // Concatenation => Primary+
-    fn parse_concatenation(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+    fn parse_concatenation(&mut self) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
         // Attempt to parse a concatenation of regular expressions
 
-        let mut concatenation = Regexp::new(ExpressionType::Concatenation);
+        let mut concatenation = ParsedRegexp::new(ExpressionType::Concatenation);
         while let Some(primary_expression) = self.parse_primary()? {
             // Parsed a new expression
             // Append its pattern
@@ -255,7 +255,7 @@ impl Parser {
             _ => {
                 // At least two expressions were parsed
                 // Composed a concatenation expression
-                // Its children are already inside it, in Regexp field `children`
+                // Its children are already inside it, in ParsedRegexp field `children`
                 let concatenation = Rc::new(RefCell::new(concatenation));
                 concatenation
                     .borrow_mut()
@@ -274,7 +274,7 @@ impl Parser {
     }
 
     // Primary => Empty | Group | MatchCharacter | MatchAnyCharacter
-    fn parse_primary(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+    fn parse_primary(&mut self) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
         // WHAT DO YOU DO `parse_primary`?
         // I parse primary expressions, which are:
         // - The empty regular expression
@@ -296,17 +296,17 @@ impl Parser {
         }
     }
 
-    // Group => "(" Regexp ")"
-    fn parse_group(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+    // Group => "(" ParsedRegexp ")"
+    fn parse_group(&mut self) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
         // Attempt to:
         // First : parse an arbitrary expression
         // Second: After `First` is finished, search for a )
         // If either `First` or `Second` fails, report an error as follow:
         // `First` failed : report error `Expected expression after (`
         // `Second` failed: report error `Expected ) after expression`
-        // These rules are due to grammar rule: Group => "(" Regexp ")"
-        // First : After `(` parser expects a `Regexp`
-        // Second: After `Regexp` parser expects a `)`
+        // These rules are due to grammar rule: Group => "(" ParsedRegexp ")"
+        // First : After `(` parser expects a `ParsedRegexp`
+        // Second: After `ParsedRegexp` parser expects a `)`
 
         // Move past opening (
         self.advance()?;
@@ -314,7 +314,7 @@ impl Parser {
         // parse an arbitrary expression or report error (? operator)
         match self.parse_expression()? {
             Some(parsed_expression) => {
-                // `parsed_expression` has type Rc<RefCell<Regexp>>
+                // `parsed_expression` has type Rc<RefCell<ParsedRegexp>>
 
                 // Advance only when current item has name TokenName::RightParent
                 // or report error `Expected ) after expression` (? operator)
@@ -325,7 +325,7 @@ impl Parser {
                 // Consume group quantifier (if any)
                 let quantifier = self.consume_quantifier()?;
                 // Construct parsed grouped expression
-                let mut group = Regexp::new(ExpressionType::Group { quantifier });
+                let mut group = ParsedRegexp::new(ExpressionType::Group { quantifier });
                 // Surround parsed expression pattern with parentheses
                 // to create pattern of this group expression
                 group.pattern = {
@@ -352,7 +352,7 @@ impl Parser {
                 // `TokenName::LeftParen`
                 // In other words, what the parser currently process is a (
                 // it makes sense to attempt to parse a grouped expression
-                // because that's what the grammar rule `Group => "(" Regexp ")"` says
+                // because that's what the grammar rule `Group => "(" ParsedRegexp ")"` says
                 // So when the parser follows what the grammar says and fails
                 // it's a syntax error you made
                 let error = "Expected expression after (";
@@ -378,7 +378,7 @@ impl Parser {
     }
 
     // Empty => ""
-    fn parse_empty_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+    fn parse_empty_expression(&mut self) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
         // Move past Empty token
         self.advance()?;
         // field `current` now points to the first character after
@@ -387,7 +387,7 @@ impl Parser {
         // Empty token because the scanner never generates
         // two or more Empty tokens in row
 
-        let mut expr = Regexp::new(ExpressionType::EmptyExpression);
+        let mut expr = ParsedRegexp::new(ExpressionType::EmptyExpression);
         // Empty string pattern for the empty expression
         expr.pattern = String::new();
 
@@ -396,13 +396,13 @@ impl Parser {
     }
 
     // MatchAnyCharacter => Dot
-    fn parse_dot_expression(&mut self) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+    fn parse_dot_expression(&mut self) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
         // Move past Dot token
         self.advance()?;
 
         let value = None;
         let quantifier = self.consume_quantifier()?;
-        let mut expr = Regexp::new(ExpressionType::CharacterExpression { value, quantifier });
+        let mut expr = ParsedRegexp::new(ExpressionType::CharacterExpression { value, quantifier });
         // A dot for dot expressions succeeded with a quantifier (if any)
         expr.pattern = format!(".{quantifier}");
 
@@ -414,13 +414,13 @@ impl Parser {
     fn parse_character_expression(
         &mut self,
         value: char,
-    ) -> Result<Option<Rc<RefCell<Regexp>>>, String> {
+    ) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
         // Move past `Character` token
         self.advance()?;
 
         let value = Some(value);
         let quantifier = self.consume_quantifier()?;
-        let mut expr = Regexp::new(ExpressionType::CharacterExpression { value, quantifier });
+        let mut expr = ParsedRegexp::new(ExpressionType::CharacterExpression { value, quantifier });
 
         // Use given character for this character expression succeeded with a quantifier (if any)
         let value = value.unwrap();
@@ -525,7 +525,7 @@ impl Parser {
 }
 
 // A public interface function
-pub fn parse(source: &str) -> Result<Regexp, String> {
-    // parse source string into a `Regexp` object
+pub fn parse(source: &str) -> Result<ParsedRegexp, String> {
+    // parse source string into a `ParsedRegexp` object
     Parser::new(source).parse_source()
 }

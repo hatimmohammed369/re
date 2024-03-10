@@ -17,7 +17,7 @@ pub fn escape(pattern: &str) -> String {
             // You need to write one slash BUT Rust needs you to escape this one slash
             // so actually we need 2 slashes
             escaped.push('\\'); // Rust escaping slash
-            escaped.push('\\'); // Regexp escaping slash
+            escaped.push('\\'); // ParsedRegexp escaping slash
         }
         escaped.push(ch);
     }
@@ -67,7 +67,7 @@ enum MatchPhase {
 // Coordinator of the matching process
 pub struct Matcher {
     // Currently processed node of the given pattern syntax tree
-    pattern: Regexp,
+    pattern: ParsedRegexp,
 
     // String on which the search (pattern matching) is done
     target: Vec<char>,
@@ -84,7 +84,7 @@ pub struct Matcher {
     // All other items represent the index of its parents amongs their siblings with the same
     // syntax tree level
     pattern_index_sequence: Vec<usize>,
-    // Of course, root pattern (Regexp parsed in Matcher::new) will have Vec
+    // Of course, root pattern (ParsedRegexp parsed in Matcher::new) will have Vec
     // of one 0usize item, because root has no parent and its the zeroth (first) child in its level
     // For instance, a value of X = vec![0, 3, 4] means that currently processed pattern (subexpression)
     // is the fourth (X[2]) child within its level
@@ -169,7 +169,7 @@ impl Matcher {
     }
 
     // Assign a new pattern to match against
-    pub fn assign_pattern_regexp(&mut self, regexp: &Regexp) {
+    pub fn assign_pattern_regexp(&mut self, regexp: &ParsedRegexp) {
         self.pattern = regexp.deep_copy();
         self.match_cache.clear();
         self.reset();
@@ -191,7 +191,7 @@ impl Matcher {
         self.backtrack_table.clear();
     }
 
-    fn supports_backtracking(expr: &Regexp) -> bool {
+    fn supports_backtracking(expr: &ParsedRegexp) -> bool {
         // An arbitrary expression E supports backtracking if:
         // 1 - It's quantified, in other words it's succeeded by a quantifier, like `.*`
         // 2 - At least one of its children supports backtracking, like `(a+|c)` because a+ can backtrack
