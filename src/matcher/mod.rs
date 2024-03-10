@@ -1,6 +1,8 @@
 // Use a parsed regular expression to match against strings
 
-use crate::parser::{parse, syntax_tree::*};
+use std::sync::{Arc, RwLock};
+
+use crate::parser::{syntax_tree::*, Parser};
 
 const METACHARACTERS: [char; 7] = ['(', ')', '\\', '|', '*', '.', '?'];
 
@@ -67,7 +69,7 @@ enum MatchPhase {
 // Coordinator of the matching process
 pub struct Matcher {
     // Currently processed node of the given pattern syntax tree
-    pattern: ParsedRegexp,
+    pattern: Arc<RwLock<ParsedRegexp>>,
 
     // String on which the search (pattern matching) is done
     target: Vec<char>,
@@ -108,7 +110,7 @@ impl Matcher {
     // Create a new matcher from `pattern`
     // which is matched against `target`
     pub fn new(pattern: &str, target: &str) -> Result<Matcher, String> {
-        let pattern = parse(pattern)?;
+        let pattern = Parser::parse(pattern)?;
         let target = target.chars().collect();
         let pos = 0;
         let next_match_phase = MatchPhase::Normal;
@@ -162,15 +164,18 @@ impl Matcher {
 
     // Assign a new pattern to match against
     pub fn assign_pattern_string(&mut self, pattern: &str) -> Result<(), String> {
-        self.pattern = parse(pattern)?;
+        self.pattern = Parser::parse(pattern)?;
         self.match_cache.clear();
         self.reset();
         Ok(())
     }
 
     // Assign a new pattern to match against
-    pub fn assign_pattern_regexp(&mut self, regexp: &ParsedRegexp) {
-        self.pattern = regexp.deep_copy();
+    pub fn assign_pattern_regexp(&mut self, regexp: &Arc<RwLock<ParsedRegexp>>) {
+        self.pattern = {
+            let regexp = regexp.read().unwrap();
+            regexp.deep_copy()
+        };
         self.match_cache.clear();
         self.reset();
     }
@@ -191,12 +196,14 @@ impl Matcher {
         self.backtrack_table.clear();
     }
 
-    fn supports_backtracking(expr: &ParsedRegexp) -> bool {
+    fn supports_backtracking(expr: &Arc<RwLock<ParsedRegexp>>) -> bool {
         // An arbitrary expression E supports backtracking if:
         // 1 - It's quantified, in other words it's succeeded by a quantifier, like `.*`
         // 2 - At least one of its children supports backtracking, like `(a+|c)` because a+ can backtrack
 
-        match &expr.expression_type {
+        let parsed_expr = expr.read().unwrap();
+        let expr_type = parsed_expr.expression_type;
+        match expr_type {
             // The empty expression can match anywhere
             // It doesn't need backtracking
             ExpressionType::EmptyExpression => false,
@@ -217,24 +224,30 @@ impl Matcher {
                 // It's not the case that this expression has no quantifier
                 // in other words, it's quantified with one of ? \ * \ +
                 !matches!(quantifier, Quantifier::None)
-                    || Self::supports_backtracking(&expr.children.borrow()[0].borrow())
+                    || Self::supports_backtracking(&parsed_expr.children.read().unwrap()[0])
                 // Variant Quantifier::None represent the idea of `no quantifier`
             }
 
             // Alternation and concatenation
             _ => {
                 // At least one child supports backtracking
-                expr.children
-                    .borrow()
+                parsed_expr
+                    .children
+                    .read()
+                    .unwrap()
                     .iter()
-                    .any(|child| Self::supports_backtracking(&child.borrow()))
+                    .any(Self::supports_backtracking)
             }
         }
     }
 
     // ALL EXPRESSIONS MUST RESTORE OLD POSITION WHEN FAILING TO MATCH
     fn compute_match(&mut self) -> Option<Match> {
-        let computed_match = match self.pattern.expression_type {
+        let parsed_pattern = Arc::clone(&self.pattern);
+        let parsed_pattern = parsed_pattern.read().unwrap();
+        let pattern_type = parsed_pattern.expression_type;
+
+        let computed_match = match pattern_type {
             ExpressionType::EmptyExpression => self.empty_expression_match(),
 
             ExpressionType::CharacterExpression { value, quantifier } => {
@@ -253,7 +266,7 @@ impl Matcher {
         if computed_match.is_some()
             && Self::supports_backtracking(&self.pattern)
             // Root expression does not backtrack
-            && self.pattern.parent.is_some()
+            && parsed_pattern.parent.is_some()
         {
             // Record first match info for later use when backtracking
 
@@ -450,8 +463,12 @@ impl Matcher {
     // Return Option::<std::ops::Range>::Some(...) on success
     // Return Option::<std::ops::Range>::None on failure
     fn group_match(&mut self, quantifier: Quantifier) -> Option<Match> {
-        let old_pattern = self.pattern.clone();
-        self.pattern = old_pattern.children.borrow()[0].borrow().clone();
+        let old_pattern = Arc::clone(&self.pattern);
+
+        let pattern = Arc::clone(&old_pattern);
+        let pattern = pattern.read().unwrap();
+        let pattern = &pattern.children;
+        self.pattern = Arc::clone(&pattern.read().unwrap()[0]);
 
         let grouped_expression_mactch = {
             // Match a grouped expression
@@ -565,12 +582,15 @@ impl Matcher {
         let alternation_match = {
             // Match an alternation expression
 
-            let children = self
-                .pattern
+            let children = Arc::clone(&old_pattern);
+            let children = children
+                .read()
+                .unwrap()
                 .children
-                .borrow()
+                .read()
+                .unwrap()
                 .iter()
-                .map(|rc| rc.borrow().clone())
+                .map(Arc::clone)
                 .collect::<Vec<_>>();
 
             let mut child_match = None;
@@ -649,15 +669,14 @@ impl Matcher {
         let concatenation_match = {
             // Match a concatenation expression
 
-            let mut children = self
-                .pattern
-                .children
-                .borrow()
+            let children = Arc::clone(&old_pattern);
+            let children = children.read().unwrap();
+            let children = children.children.read().unwrap();
+            let mut children = children
                 .iter()
-                .map(|rc| {
-                    let expr = rc.borrow().clone();
+                .map(|arc| {
                     // (expression, backtrack table (self.backtrack_table) associated entry index)
-                    (expr, Option::<usize>::None)
+                    (arc, Option::<usize>::None)
                 })
                 .collect::<Vec<_>>();
 
