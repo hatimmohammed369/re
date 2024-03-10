@@ -115,7 +115,7 @@ impl Parser {
 
     // ParsedRegexp => Concatenation ( "|" Concatenation )*
     fn parse_expression(&mut self) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
-        match &self.current {
+        match self.current {
             None => {
                 // Reached end of input, no expression can be parsed
                 Ok(None)
@@ -203,7 +203,7 @@ impl Parser {
                         let error_char = &source[token.position..=token.position];
                         let error = format!("Expected expression before {error_char}");
                         let (error_index, error_position) = {
-                            match &self.current {
+                            match self.current {
                                 Some(Token { position, .. }) => {
                                     (*position, format!("in position {position}"))
                                 }
@@ -282,7 +282,7 @@ impl Parser {
         // - Character expressions like `x`
         // - Grouped regular expressions, like `(abc)`
 
-        match &self.current.as_ref() {
+        match self.current {
             Some(token) => {
                 match &token.type_name {
                     TokenType::Empty => self.parse_empty_expression(),
@@ -358,7 +358,7 @@ impl Parser {
                 let error = "Expected expression after (";
                 let source = self.scanner.get_source_string();
                 let (error_index, error_position) = {
-                    match &self.current {
+                    match self.current {
                         Some(Token { position, .. }) => {
                             (*position, format!("in position {position}"))
                         }
@@ -440,7 +440,7 @@ impl Parser {
             let error = "Unbalanced )\n) is used without a matching (";
             let source = self.scanner.get_source_string();
             let (error_index, error_position) = {
-                match &self.current {
+                match self.current {
                     Some(Token { position, .. }) => (*position, format!("in position {position}")),
                     None => (source.len(), String::from("at end of pattern")), // in case parser reached end of input
                 }
@@ -466,7 +466,7 @@ impl Parser {
             // Note the word `possibly`, if pattern ends with a matching )
             // then the parser will report a syntax error
             self.grouping_marks.push(GroupingMark::Group {
-                position: self.current.as_ref().unwrap().position,
+                position: self.current.unwrap().position,
             });
             return Ok(());
         }
@@ -476,7 +476,7 @@ impl Parser {
 
     // Check if current token (if any) has a given type
     fn check(&self, expected: TokenType) -> bool {
-        match &self.current {
+        match self.current {
             Some(token) => token.type_name == expected,
             None => false,
         }
@@ -493,7 +493,7 @@ impl Parser {
             // this is a syntax error
             let source = self.scanner.get_source_string();
             let (error_index, error_position) = {
-                match &self.current {
+                match self.current {
                     Some(Token { position, .. }) => (*position, format!("in position {position}")),
                     None => (source.len(), String::from("at end of pattern")), // in case parser reached end of input
                 }
@@ -515,7 +515,20 @@ impl Parser {
         // Check current token, if its name (field `name`) is either one of:
         // Mark, Star, Plus
         // Consume each and construct a Quantifier variant
-        let quantifier = Quantifier::from(&self.current);
+        let quantifier = {
+            match self.current {
+                Some(tok) => {
+                    // I do not want `cargo fmt` remove the outer block
+                    match tok.type_name {
+                        TokenType::Mark => Quantifier::ZeroOrOne,
+                        TokenType::Star => Quantifier::ZeroOrMore,
+                        TokenType::Plus => Quantifier::OneOrMore,
+                        _ => Quantifier::None,
+                    }
+                }
+                None => Quantifier::None,
+            }
+        };
         if !matches!(quantifier, Quantifier::None) {
             // We found a quantifier, consume it
             self.advance()?;

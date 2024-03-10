@@ -1,6 +1,5 @@
 // Syntax tree structs (Tokens structures)
 
-use crate::scanner::tokens::*;
 use std::cell::RefCell;
 use std::collections::LinkedList;
 use std::fmt::Display;
@@ -12,23 +11,6 @@ pub enum Quantifier {
     ZeroOrOne,  // Quantifier ?
     ZeroOrMore, // Quantifier *
     OneOrMore,  // Quantifier +
-}
-
-impl From<&Option<Token>> for Quantifier {
-    fn from(token: &Option<Token>) -> Self {
-        match token {
-            Some(tok) => {
-                // I do not want `cargo fmt` remove the outer block
-                match tok.type_name {
-                    TokenType::Mark => Quantifier::ZeroOrOne,
-                    TokenType::Star => Quantifier::ZeroOrMore,
-                    TokenType::Plus => Quantifier::OneOrMore,
-                    _ => Quantifier::None,
-                }
-            }
-            None => Quantifier::None,
-        }
-    }
 }
 
 impl Display for Quantifier {

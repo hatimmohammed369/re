@@ -2,7 +2,7 @@
 #[allow(dead_code)]
 #[allow(clippy::let_and_return)]
 // enable pretty-printing if needed
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TokenType {
     // Token types (names)
     // When we say `an Empty token` we mean a Token object
@@ -38,7 +38,7 @@ pub enum TokenType {
 // The scanner just splits the pattern string for the parser
 
 // enable pretty-printing if needed
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Token {
     // What kind this token is?
     pub type_name: TokenType,
