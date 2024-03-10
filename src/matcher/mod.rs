@@ -96,6 +96,10 @@ pub struct Matcher {
     // Backtrack info of all subexpressions which can backtrack
     backtrack_table: Vec<ExpressionBacktrackInfo>,
 
+    // Exclusive upper bound of ongoing match
+    // Match fails if gives back a range whose end index >= `match_bound`
+    match_bound: usize,
+
     // Successful matches
     match_cache: Vec<Match>,
 
@@ -111,11 +115,12 @@ impl Matcher {
     // which is matched against `target`
     pub fn new(pattern: &str, target: &str) -> Result<Matcher, String> {
         let pattern = Parser::parse(pattern)?;
-        let target = target.chars().collect();
+        let target = target.chars().collect::<Vec<_>>();
         let pos = 0;
         let next_match_phase = MatchPhase::Normal;
         let pattern_index_sequence = vec![];
         let backtrack_table = vec![];
+        let match_bound = target.len() + 1;
         let match_cache = vec![];
         let matches_substring_start = Option::<usize>::None;
         let matches_substring_end = 0;
@@ -127,6 +132,7 @@ impl Matcher {
             next_match_phase,
             pattern_index_sequence,
             backtrack_table,
+            match_bound,
             match_cache,
             matches_substring_start,
             matches_substring_end,
@@ -260,6 +266,25 @@ impl Matcher {
             ExpressionType::Concatenation => self.concatenation_match(),
         };
 
+        // Grouped expressions do not have entries in backtrack table `self.backtrack_table`
+        // but they MUST never give back a match whose end index >= match bound of their group parent
+        let expression_not_grouped = {
+            match &parsed_pattern.parent {
+                Some(parent_weak_ref) => {
+                    let parent = parent_weak_ref.upgrade().unwrap();
+                    let parent_is_a_group = matches!(
+                        parent.read().unwrap().expression_type,
+                        ExpressionType::Group { .. }
+                    );
+                    !parent_is_a_group
+                }
+                None => {
+                    // No parent => no group parent
+                    true // that this expression is not grouped
+                }
+            }
+        };
+
         // If current expression successfully matched AND
         // It can backtrack (like .?) AND
         // It's not root expression (it makes no sense to have root expression request a backtrack, it has no siblings)
@@ -267,6 +292,7 @@ impl Matcher {
             && Self::supports_backtracking(&self.pattern)
             // Root expression does not backtrack
             && parsed_pattern.parent.is_some()
+            && expression_not_grouped
         {
             // Record first match info for later use when backtracking
 
@@ -383,31 +409,27 @@ impl Matcher {
         value: Option<char>,
         quantifier: Quantifier,
     ) -> Option<Match> {
-        let match_bound = {
-            // `match_bound` is EXCLUSIVE, so we stop if `self.pos >= match_bound`
-
+        let old_match_bound = self.match_bound;
+        self.match_bound = {
             // Find backtrack entry (in self.backtrack_table) of this character/dot expression
-            let table_entry = self
-                .backtrack_table
-                .iter()
-                .find(|entry| entry.index_sequence == self.pattern_index_sequence);
-            match table_entry {
+            let table_entry_index = self.backtrack_table.binary_search_by(|info_entry| {
+                info_entry.index_sequence.cmp(&self.pattern_index_sequence)
+            });
+            match table_entry_index {
                 // This expression matched/backtracked before
-                Some(info) => {
+                Ok(entry_index) => {
                     // Subtract one, if possible, from last match end index
                     // to force this expression to match a smaller range
-                    info.last_match_end.saturating_sub(1)
+                    self.backtrack_table[entry_index]
+                        .last_match_end
+                        .saturating_sub(1)
                 }
                 // This expression NEVER matched/backtracked before
-                None => {
-                    // Add one so this expression can make match
-                    // up to target end consuming all remaining characters
-                    self.target.len() + 1
-                }
+                _ => old_match_bound,
             }
         };
 
-        match quantifier {
+        let expr_match = match quantifier {
             Quantifier::None | Quantifier::ZeroOrOne => {
                 // Match `x`\`x?` (value = Some('x')) or `.`\`.?` (value = None)
                 if self.has_next() && (value.is_none() || self.target[self.pos] == value.unwrap()) {
@@ -429,11 +451,13 @@ impl Matcher {
                 // Match `x*` \ `x+` (value = Some('x')) or `.*` \ `.+` (value = None)
                 let start = self.current();
                 if value.is_none() {
-                    self.set_position(match_bound);
+                    // Matching `.*` or `.+`
+                    // Just move `self.pos`
+                    self.set_position(self.match_bound.saturating_sub(1));
                 } else {
                     let value = value.unwrap();
                     while let Some(target_char) = self.target.get(self.pos) {
-                        if *target_char != value || self.pos >= match_bound {
+                        if *target_char != value || self.pos >= self.match_bound {
                             break;
                         }
                         self.advance();
@@ -446,10 +470,15 @@ impl Matcher {
                 } else if matches!(quantifier, Quantifier::ZeroOrMore) {
                     self.empty_expression_match()
                 } else {
+                    // Match bound exceeded/reached, abort
                     Option::<Match>::None
                 }
             }
-        }
+        };
+
+        self.match_bound = old_match_bound;
+
+        expr_match
     }
 
     // GROUP/GROUPED EXPRESSIONS:
@@ -463,30 +492,29 @@ impl Matcher {
     // Return Option::<std::ops::Range>::Some(...) on success
     // Return Option::<std::ops::Range>::None on failure
     fn group_match(&mut self, quantifier: Quantifier) -> Option<Match> {
-        let old_pattern = Arc::clone(&self.pattern);
+        let old_match_bound = self.match_bound;
+        self.match_bound = {
+            // Find backtrack entry (in self.backtrack_table) of this group expression
+            let table_entry_index = self.backtrack_table.binary_search_by(|info_entry| {
+                info_entry.index_sequence.cmp(&self.pattern_index_sequence)
+            });
+            match table_entry_index {
+                // This expression matched/backtracked before
+                Ok(entry_index) => self.backtrack_table[entry_index]
+                    .last_match_end
+                    .saturating_sub(1),
+                // This expression NEVER matched/backtracked before
+                _ => old_match_bound,
+            }
+        };
 
+        let old_pattern = Arc::clone(&self.pattern);
         let pattern = Arc::clone(&old_pattern);
         let pattern = pattern.read().unwrap();
         let pattern = &pattern.children;
         self.pattern = Arc::clone(&pattern.read().unwrap()[0]);
 
         let grouped_expression_mactch = {
-            // Match a grouped expression
-
-            let match_bound = {
-                // Find backtrack entry (in self.backtrack_table) of this group expression
-                let table_entry = self
-                    .backtrack_table
-                    .iter()
-                    .find(|entry| entry.index_sequence == self.pattern_index_sequence);
-                match table_entry {
-                    // This expression matched/backtracked before
-                    Some(info) => info.last_match_end.saturating_sub(1),
-                    // This expression NEVER matched/backtracked before
-                    None => self.target.len(),
-                }
-            };
-
             // Start tracking your child
             self.dive();
             // `self.dive()` MUST be called here because it mutates `self.pattern_index_sequence`
@@ -494,66 +522,79 @@ impl Matcher {
             // Thus calling `self.dive()` before computing `match_bound` makes the search
             // in `self.backtrack_table` always fail
 
-            if let Quantifier::None = quantifier {
-                // This group is NOT quantified (`(a)` for instance)
-                // return whatever match its inner expression returns
-                return self.compute_match();
-            }
-
-            // A guard to stop matching if inner expression matched the empty string at least once
-            // so that Matcher does not loop endlessly matching the empty string at current position
-            let mut matched_empty_string = false;
-
-            let start = self.current();
-            let mut end = self.current();
-            // Keep matching inner expression unless match bound is exceeded
-            // or the inner expression matched the empty string at least once
-            while let Some(new_match) = self.compute_match() {
-                if self.pos > match_bound {
-                    // Match bound exceeded while matching inner expression
-                    // Roll back to end of most recent successful match
-                    self.set_position(end);
-                    break;
-                }
-                if new_match.is_empty() && matched_empty_string {
-                    // Stop matching inner expression E when it has
-                    // matched the empty string
-                    // or Matcher will never stop because it can always
-                    // match the empty string at current position
-                    break;
+            match quantifier {
+                Quantifier::None => {
+                    // Matching `(E)`
+                    // return whatever expression `E` returns
+                    self.compute_match()
                 }
 
-                // New match made without exceeding match bound
-                // AND the empty string was NOT matched
-                // Update match end index of this group expression
-                end = new_match.end;
-                matched_empty_string = new_match.is_empty();
-            }
+                Quantifier::ZeroOrOne => {
+                    // Matching `(E)?`
+                    match self.compute_match() {
+                        Some(inner_expression_match) => {
+                            if inner_expression_match.end >= self.match_bound {
+                                // Match bound exceeded/reached, abort
+                                Option::<Match>::None
+                            } else {
+                                Some(inner_expression_match)
+                            }
+                        }
+                        None => self.empty_expression_match(),
+                    }
+                }
 
-            // Matched empty range BUT that empty range is NOT the empty string
-            // In other words, failed to match even the empty string
-            if start == end && !matched_empty_string {
-                // Total failure
-                match quantifier {
-                    // Handled above
-                    Quantifier::None => {
-                        unreachable!();
+                _ => {
+                    // Matching `(E)*` or `(E)+`
+
+                    // A guard to stop matching if inner expression matched the empty string at least once
+                    // so that Matcher does not loop endlessly matching the empty string at current position
+                    let mut matched_empty_string = false;
+
+                    let start = self.current();
+                    let mut end = self.current();
+                    // Keep matching inner expression unless match bound is exceeded
+                    // or the inner expression matched the empty string at least once
+                    while let Some(new_match) = self.compute_match() {
+                        if self.pos > self.match_bound {
+                            // Match bound exceeded while matching inner expression
+                            // Roll back to end of most recent successful match
+                            self.set_position(end);
+                            break;
+                        }
+                        if new_match.is_empty() && matched_empty_string {
+                            // Stop matching inner expression E when it has
+                            // matched the empty string
+                            // or Matcher will never stop because it can always
+                            // match the empty string at current position
+                            break;
+                        }
+
+                        // New match made without exceeding match bound
+                        // AND the empty string was NOT matched
+                        // Update match end index of this group expression
+                        end = new_match.end;
+                        matched_empty_string = new_match.is_empty();
                     }
 
-                    // E failed, then so would (E)+
-                    Quantifier::OneOrMore => Option::<Match>::None,
-
-                    // E failed, then (E)? and (E)* match the empty string
-                    _ => self.empty_expression_match(),
+                    // Matched empty range BUT that empty range is NOT the empty string
+                    // In other words, failed to match even the empty string
+                    if start == end && !matched_empty_string {
+                        // Total failure
+                        if matches!(quantifier, Quantifier::OneOrMore) {
+                            Option::<Match>::None
+                        } else {
+                            self.empty_expression_match()
+                        }
+                    } else {
+                        // Matched some string, possibly the empty string
+                        Some(Match { start, end })
+                    }
                 }
-            } else {
-                // Matched some string, possibly the empty string
-                Some(Match { start, end })
             }
-
-            // Grouped expression computation ends
         };
 
+        self.match_bound = old_match_bound;
         // Restore parent pattern to process remaining siblings of current pattern
         self.pattern = old_pattern;
         // Abandon your child
@@ -580,8 +621,6 @@ impl Matcher {
         let old_pattern = self.pattern.clone();
 
         let alternation_match = {
-            // Match an alternation expression
-
             let children = Arc::clone(&old_pattern);
             let children = children
                 .read()
@@ -616,7 +655,6 @@ impl Matcher {
                 self.appoint_next_child();
             }
 
-            // Alternation expression match computation ends
             child_match
         };
 
@@ -667,8 +705,6 @@ impl Matcher {
         let old_pattern = self.pattern.clone();
 
         let concatenation_match = {
-            // Match a concatenation expression
-
             let children = Arc::clone(&old_pattern);
             let children = children.read().unwrap();
             let children = children.children.read().unwrap();
@@ -789,7 +825,6 @@ impl Matcher {
                 self.appoint_next_child();
             }
 
-            // Concatenation expression match computation ends
             Some(Match {
                 start: old_position,
                 end: match_region_end,
