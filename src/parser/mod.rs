@@ -6,8 +6,7 @@ pub mod syntax_tree;
 
 use crate::scanner::{tokens::*, Scanner};
 use crate::{format_error, report_fatal_error};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 use syntax_tree::*;
 
 #[allow(dead_code)]
@@ -45,8 +44,13 @@ impl Parser {
         }
     }
 
+    pub fn parse(source: &str) -> Result<Arc<RwLock<ParsedRegexp>>, String> {
+        // parse source string into a `ParsedRegexp` object
+        Parser::new(source).parse_source()
+    }
+
     // Attempt to parse source string
-    fn parse_source(&mut self) -> Result<ParsedRegexp, String> {
+    fn parse_source(&mut self) -> Result<Arc<RwLock<ParsedRegexp>>, String> {
         // Grab the first token in stream
         self.advance()?;
         match self.parse_expression() {
@@ -55,47 +59,12 @@ impl Parser {
 
             // Successfully parsed source string
             Ok(option_regexp) => {
-                // `option_regexp` has type Option<Rc<RefCell<ParsedRegexp>>>
+                // `option_regexp` has type Option<Arc<RwLock<ParsedRegexp>>>
                 match option_regexp {
                     Some(regexp) => {
-                        // When done parsing, take the resulting `ParsedRegexp`
-                        // and clone (shallow copy) its data
-                        // - Field `tag` holds data local to expression (namely its type)
-                        // and also it's easily clone
-                        // - Fields `parent` and `children` hold counted references
-                        // which are easily copied without losing referenced data
-                        // those counted references only increase their internal count when cloned
-                        let regexp = regexp.borrow();
-
-                        let tag = regexp.expression_type;
-                        let pattern = regexp.pattern.clone();
-                        let source_pattern = self.scanner.get_source_string();
-                        if pattern != source_pattern {
-                            report_fatal_error(&format!(
-                                "Parser made a mistake while building ParsedRegexp pattern\n\
-                                Built pattern : {pattern}\n\
-                                Source pattern: {source_pattern}"
-                            ))
-                        }
-                        // parent is `None` because this `ParsedRegexp` is syntax tree root.
-                        let parent = None;
-                        // Clone Rc's which is merely increasing internal reference count
-                        let children = RefCell::new(
-                            regexp
-                                .children
-                                .borrow()
-                                .iter()
-                                .map(Rc::clone)
-                                .collect::<Vec<_>>(),
-                        );
-
-                        // Successfully parsed entire source string
-                        Ok(ParsedRegexp {
-                            expression_type: tag,
-                            pattern,
-                            parent,
-                            children,
-                        })
+                        // Return the Arc itself otherwise it will dropped making direct child of
+                        // root expression hold invalid Weak references to their parent (root itself)
+                        Ok(regexp)
                     }
                     None => {
                         // Could not parse source string for some unknown reason
@@ -114,7 +83,7 @@ impl Parser {
     }
 
     // ParsedRegexp => Concatenation ( "|" Concatenation )*
-    fn parse_expression(&mut self) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
+    fn parse_expression(&mut self) -> Result<Option<Arc<RwLock<ParsedRegexp>>>, String> {
         match self.current {
             None => {
                 // Reached end of input, no expression can be parsed
@@ -131,16 +100,16 @@ impl Parser {
                         // Attempt to parse an arbitrary expression
                         // But do that attempt to parse an alternation expression
                         // because alternation has the lowest precedence of all regular expressions operations
+                        let mut alternation_pattern = String::new();
                         let mut alternation = ParsedRegexp::new(ExpressionType::Alternation);
 
                         // First, attempt to parse one concatenation
                         if let Some(concatenation) = self.parse_concatenation()? {
                             // Parsed first concatenation
                             // Append its pattern
-                            alternation
-                                .pattern
-                                .push_str(&format!("{}|", concatenation.borrow().pattern));
-                            alternation.children.borrow_mut().push(concatenation);
+                            alternation_pattern
+                                .push_str(&format!("{}|", concatenation.read().unwrap().pattern));
+                            alternation.children.write().unwrap().push(concatenation);
 
                             // As long as current token is |, keep parsing concatenations
                             while self.check(TokenType::Pipe) {
@@ -149,18 +118,19 @@ impl Parser {
                                 if let Some(expression) = self.parse_concatenation()? {
                                     // Parsed a new expression
                                     // Append its pattern
-                                    alternation
-                                        .pattern
-                                        .push_str(&format!("{}|", expression.borrow().pattern));
+                                    alternation_pattern.push_str(&format!(
+                                        "{}|",
+                                        expression.read().unwrap().pattern
+                                    ));
                                     // append it to field `children` of this `alternation`
-                                    alternation.children.borrow_mut().push(expression);
+                                    alternation.children.write().unwrap().push(expression);
                                 }
                             }
                         }
 
-                        // Can't use `alternation.children.borrow().len()` directly with `match`
+                        // Can't use `alternation.children.read().unwrap().len()` directly with `match`
                         // because `alternation` is moved inside `match` body
-                        let parsed_expressions = alternation.children.borrow().len();
+                        let parsed_expressions = alternation.children.read().unwrap().len();
                         match parsed_expressions {
                             0 => {
                                 // No expression was parsed, possibly end of pattern
@@ -171,25 +141,28 @@ impl Parser {
                                 // of at least two expressions, thus it makes no sense to return this single
                                 // expression as an alternation
                                 // Return this expression verbatim
-                                Ok(alternation.children.borrow_mut().pop())
+                                Ok(alternation.children.write().unwrap().pop())
                             }
                             _ => {
                                 // Remove trailing |
-                                alternation.pattern.pop();
+                                alternation_pattern.pop();
 
                                 // At least two expressions were parsed
                                 // Composed an alternation expression
                                 // Its children are already inside it, in ParsedRegexp field `children`
-                                let alternation = Rc::new(RefCell::new(alternation));
+                                alternation.pattern = Arc::from(alternation_pattern);
+                                let alternation = Arc::new(RwLock::new(alternation));
                                 alternation
-                                    .borrow_mut()
+                                    .write()
+                                    .unwrap()
                                     .children
-                                    .borrow_mut()
+                                    .write()
+                                    .unwrap()
                                     .iter_mut()
                                     .for_each(|child| {
                                         // Make each child obtain a weak reference to its parent `alternation`
-                                        child.borrow_mut().parent =
-                                            Some(Rc::downgrade(&alternation));
+                                        child.write().unwrap().parent =
+                                            Some(Arc::downgrade(&alternation));
                                     });
 
                                 // Successfully parsed an alternation expression
@@ -205,7 +178,7 @@ impl Parser {
                         let (error_index, error_position) = {
                             match self.current {
                                 Some(Token { position, .. }) => {
-                                    (*position, format!("in position {position}"))
+                                    (position, format!("in position {position}"))
                                 }
                                 None => (source.len(), String::from("at end of pattern")), // in case parser reached end of input
                             }
@@ -223,23 +196,26 @@ impl Parser {
     }
 
     // Concatenation => Primary+
-    fn parse_concatenation(&mut self) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
+    fn parse_concatenation(&mut self) -> Result<Option<Arc<RwLock<ParsedRegexp>>>, String> {
         // Attempt to parse a concatenation of regular expressions
 
+        let mut concatenation_pattern = String::new();
         let mut concatenation = ParsedRegexp::new(ExpressionType::Concatenation);
         while let Some(primary_expression) = self.parse_primary()? {
             // Parsed a new expression
             // Append its pattern
-            concatenation
-                .pattern
-                .push_str(&primary_expression.borrow().pattern);
+            concatenation_pattern.push_str(&primary_expression.read().unwrap().pattern);
             // append it to field `children` of this `alternation`
-            concatenation.children.borrow_mut().push(primary_expression);
+            concatenation
+                .children
+                .write()
+                .unwrap()
+                .push(primary_expression);
         }
 
-        // Can't use `concatenation.children.borrow().len()` directly with `match`
+        // Can't use `concatenation.children.read().unwrap().len()` directly with `match`
         // because `concatenation` is moved inside `match` body
-        let parsed_expressions = concatenation.children.borrow().len();
+        let parsed_expressions = concatenation.children.read().unwrap().len();
         match parsed_expressions {
             0 => {
                 // No expression was parsed, possibly end of pattern
@@ -250,21 +226,24 @@ impl Parser {
                 // of at least two expressions, thus it makes no sense to return this single
                 // expression as a concatenation
                 // Return this expression verbatim
-                Ok(concatenation.children.borrow_mut().pop())
+                Ok(concatenation.children.write().unwrap().pop())
             }
             _ => {
                 // At least two expressions were parsed
                 // Composed a concatenation expression
                 // Its children are already inside it, in ParsedRegexp field `children`
-                let concatenation = Rc::new(RefCell::new(concatenation));
+                concatenation.pattern = Arc::from(concatenation_pattern);
+                let concatenation = Arc::new(RwLock::new(concatenation));
                 concatenation
-                    .borrow_mut()
+                    .write()
+                    .unwrap()
                     .children
-                    .borrow_mut()
+                    .write()
+                    .unwrap()
                     .iter_mut()
                     .for_each(|child| {
                         // Make each child obtain a weak reference to its parent `concatenation`
-                        child.borrow_mut().parent = Some(Rc::downgrade(&concatenation));
+                        child.write().unwrap().parent = Some(Arc::downgrade(&concatenation));
                     });
 
                 // Successfully parsed a concatenation expression
@@ -274,7 +253,7 @@ impl Parser {
     }
 
     // Primary => Empty | Group | MatchCharacter | MatchAnyCharacter
-    fn parse_primary(&mut self) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
+    fn parse_primary(&mut self) -> Result<Option<Arc<RwLock<ParsedRegexp>>>, String> {
         // WHAT DO YOU DO `parse_primary`?
         // I parse primary expressions, which are:
         // - The empty regular expression
@@ -297,7 +276,7 @@ impl Parser {
     }
 
     // Group => "(" ParsedRegexp ")"
-    fn parse_group(&mut self) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
+    fn parse_group(&mut self) -> Result<Option<Arc<RwLock<ParsedRegexp>>>, String> {
         // Attempt to:
         // First : parse an arbitrary expression
         // Second: After `First` is finished, search for a )
@@ -314,7 +293,7 @@ impl Parser {
         // parse an arbitrary expression or report error (? operator)
         match self.parse_expression()? {
             Some(parsed_expression) => {
-                // `parsed_expression` has type Rc<RefCell<ParsedRegexp>>
+                // `parsed_expression` has type Arc<RwLock<ParsedRegexp>>
 
                 // Advance only when current item has name TokenName::RightParent
                 // or report error `Expected ) after expression` (? operator)
@@ -329,18 +308,19 @@ impl Parser {
                 // Surround parsed expression pattern with parentheses
                 // to create pattern of this group expression
                 group.pattern = {
-                    let parsed_expression_pattern = &parsed_expression.borrow().pattern;
+                    let parsed_expression_pattern = &parsed_expression.read().unwrap().pattern;
                     let group_quantifier = quantifier;
-                    format!("({parsed_expression_pattern}){group_quantifier}")
+                    Arc::from(format!("({parsed_expression_pattern}){group_quantifier}"))
                 };
                 // let `group` take ownership of the expression it encloses
-                group.children.borrow_mut().push(parsed_expression);
+                group.children.write().unwrap().push(parsed_expression);
                 // convert `group` to appropriate return type
-                let group = Rc::new(RefCell::new(group));
+                let group = Arc::new(RwLock::new(group));
                 // make enclosed expression `parent` field points to `group`
-                group.borrow_mut().children.borrow_mut()[0]
-                    .borrow_mut()
-                    .parent = Some(Rc::downgrade(&group));
+                group.write().unwrap().children.write().unwrap()[0]
+                    .write()
+                    .unwrap()
+                    .parent = Some(Arc::downgrade(&group));
 
                 // Successfully parsed a grouped expression
                 Ok(Some(group))
@@ -360,7 +340,7 @@ impl Parser {
                 let (error_index, error_position) = {
                     match self.current {
                         Some(Token { position, .. }) => {
-                            (*position, format!("in position {position}"))
+                            (position, format!("in position {position}"))
                         }
                         None => (source.len(), String::from("at end of pattern")), // in case parser reached end of input
                     }
@@ -378,7 +358,7 @@ impl Parser {
     }
 
     // Empty => ""
-    fn parse_empty_expression(&mut self) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
+    fn parse_empty_expression(&mut self) -> Result<Option<Arc<RwLock<ParsedRegexp>>>, String> {
         // Move past Empty token
         self.advance()?;
         // field `current` now points to the first character after
@@ -389,14 +369,14 @@ impl Parser {
 
         let mut expr = ParsedRegexp::new(ExpressionType::EmptyExpression);
         // Empty string pattern for the empty expression
-        expr.pattern = String::new();
+        expr.pattern = Arc::from("");
 
         // Successfully parsed an empty expression
-        Ok(Some(Rc::new(RefCell::new(expr))))
+        Ok(Some(Arc::new(RwLock::new(expr))))
     }
 
     // MatchAnyCharacter => Dot
-    fn parse_dot_expression(&mut self) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
+    fn parse_dot_expression(&mut self) -> Result<Option<Arc<RwLock<ParsedRegexp>>>, String> {
         // Move past Dot token
         self.advance()?;
 
@@ -404,30 +384,31 @@ impl Parser {
         let quantifier = self.consume_quantifier()?;
         let mut expr = ParsedRegexp::new(ExpressionType::CharacterExpression { value, quantifier });
         // A dot for dot expressions succeeded with a quantifier (if any)
-        expr.pattern = format!(".{quantifier}");
+        expr.pattern = Arc::from(format!(".{quantifier}").as_str());
 
         // Successfully parsed a dot expression
-        Ok(Some(Rc::new(RefCell::new(expr))))
+        Ok(Some(Arc::new(RwLock::new(expr))))
     }
 
     // Character => OrdinaryCharacter | EscapedMetacharacter
     fn parse_character_expression(
         &mut self,
         value: char,
-    ) -> Result<Option<Rc<RefCell<ParsedRegexp>>>, String> {
+    ) -> Result<Option<Arc<RwLock<ParsedRegexp>>>, String> {
         // Move past `Character` token
         self.advance()?;
 
-        let value = Some(value);
         let quantifier = self.consume_quantifier()?;
-        let mut expr = ParsedRegexp::new(ExpressionType::CharacterExpression { value, quantifier });
+        let mut expr = ParsedRegexp::new(ExpressionType::CharacterExpression {
+            value: Some(value),
+            quantifier,
+        });
 
         // Use given character for this character expression succeeded with a quantifier (if any)
-        let value = value.unwrap();
-        expr.pattern = format!("{value}{quantifier}");
+        expr.pattern = Arc::from(format!("{value}{quantifier}").as_str());
 
         // Successfully parsed a character expression
-        Ok(Some(Rc::new(RefCell::new(expr))))
+        Ok(Some(Arc::new(RwLock::new(expr))))
     }
 
     // Read next token in stream
@@ -441,7 +422,7 @@ impl Parser {
             let source = self.scanner.get_source_string();
             let (error_index, error_position) = {
                 match self.current {
-                    Some(Token { position, .. }) => (*position, format!("in position {position}")),
+                    Some(Token { position, .. }) => (position, format!("in position {position}")),
                     None => (source.len(), String::from("at end of pattern")), // in case parser reached end of input
                 }
             };
@@ -494,7 +475,7 @@ impl Parser {
             let source = self.scanner.get_source_string();
             let (error_index, error_position) = {
                 match self.current {
-                    Some(Token { position, .. }) => (*position, format!("in position {position}")),
+                    Some(Token { position, .. }) => (position, format!("in position {position}")),
                     None => (source.len(), String::from("at end of pattern")), // in case parser reached end of input
                 }
             };
@@ -535,10 +516,4 @@ impl Parser {
         }
         Ok(quantifier)
     }
-}
-
-// A public interface function
-pub fn parse(source: &str) -> Result<ParsedRegexp, String> {
-    // parse source string into a `ParsedRegexp` object
-    Parser::new(source).parse_source()
 }
