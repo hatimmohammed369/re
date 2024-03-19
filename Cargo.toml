@@ -1,6 +1,6 @@
 [package]
 name = "regexps"
-version = "0.3.0"
+version = "0.1.0"
 authors = ["Hatim Muhammed", "marshallriemann@gmail.com"]
 description = "A simple regular expressions library"
 repository = "https://github.com/hatimmohammed369/rust-regexps"

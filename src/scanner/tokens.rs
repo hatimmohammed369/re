@@ -1,6 +1,3 @@
-//(x \ x? \ x* \ x+) disable some annoying warnings
-#[allow(dead_code)]
-#[allow(clippy::let_and_return)]
 // enable pretty-printing if needed
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TokenType {
@@ -8,7 +5,13 @@ pub enum TokenType {
     // When we say `an Empty token` we mean a Token object
     // whose `name` field is set to `TokenName::Empty`
 
-    // *SPECIAL
+    // ANCHORS
+    StartAnchor,     // \A
+    EndAnchor,       // \Z
+    WordBoundary,    // \b
+    NonWordBoundary, // \B
+
+    // SPECIAL
     // indicator of places like:
     // "" (an empty string)
     // "|..." before the leading |
@@ -20,7 +23,7 @@ pub enum TokenType {
     Empty,
     Character { value: char },
 
-    // *METACHARACTERS
+    // METACHARACTERS
     LeftParen,  // (
     RightParen, // )
     Pipe,       // |, alternation operator (E1|E2|...|E_n)

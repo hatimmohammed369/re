@@ -8,6 +8,12 @@ use tokens::{Token, TokenType::*};
 
 use crate::report_fatal_error;
 
+pub const ANCHORS: [char; 4] = ['A', 'Z', 'b', 'B'];
+
+pub fn is_anchor_char(ch: char) -> bool {
+    ANCHORS.contains(&ch)
+}
+
 pub struct Scanner {
     // source string characters vector to allow fast access
     source: Vec<char>,
@@ -49,7 +55,7 @@ impl Scanner {
 
     // get character at (index + offset) if this position exists
     // otherwise return \0
-    fn get(&self, index: usize, offset: isize) -> char {
+    fn get_char_at(&self, index: usize, offset: isize) -> char {
         let negative = offset < 0;
         // absolute value of `offset` as a usize integer
         let offset = offset.unsigned_abs();
@@ -87,18 +93,18 @@ impl Scanner {
     }
 
     // get character right before currently processed character
-    fn previous(&self) -> char {
-        self.get(self.current, -1)
+    fn get_previous_char(&self) -> char {
+        self.get_char_at(self.current, -1)
     }
 
     // get the currenlty processed character
-    fn peek(&self) -> char {
-        self.get(self.current, 0)
+    fn get_peek_char(&self) -> char {
+        self.get_char_at(self.current, 0)
     }
 
     // get character right after currently processed character
-    fn next_char(&self) -> char {
-        self.get(self.current, 1)
+    fn get_next_char(&self) -> char {
+        self.get_char_at(self.current, 1)
     }
 }
 
@@ -111,15 +117,15 @@ impl Iterator for Scanner {
         // First, try to generate an Empty token because
         // the empty string can appear anywhere within a string
         // even within the empty string (which is itself)
-        let peek = self.peek();
-
-        let prev = self.previous();
+        let peek_char = self.get_peek_char();
+        let next_char = self.get_next_char();
+        let previous_car = self.get_previous_char();
         // if certain characters "( | )" are adjacent with the former not escaped
         // we can generate an Empty token
         // self.source[self.current - 2] (if exists) is second to current character
         // it's where to look to check whether previous character is preceeded by a slash
         // which means it's escaped
-        let is_prev_escaped = self.get(self.current, -2) == '\\';
+        let is_prev_escaped = self.get_char_at(self.current, -2) == '\\';
         if !is_prev_escaped && !self.found_empty_string {
             // Set flag (self.found_empty_string) to not attempt to generate Empty token
             // if previous iteration did
@@ -137,33 +143,33 @@ impl Iterator for Scanner {
                 // CASE 2
                 // "|..."
                 // source string begins with |, emit `Empty` BEFORE the leading |
-                (self.current == 0 && peek == '|') ||
+                (self.current == 0 && peek_char == '|') ||
 
                 // CASE 3
                 // "...|"
                 // source string ends with |, emit `Empty` AFTER the trailing |
-                (self.current == self.source.len() && prev == '|' && peek == '\0') ||
+                (self.current == self.source.len() && previous_car == '|' && peek_char == '\0') ||
 
                 // CASE 4
                 // "...||..."
                 // emit `Empty` AFTER | and BEFORE following |
                 // in other words, emit `Empty` between two adjacent |'s
-                (prev == '|' && peek == '|') ||
+                (previous_car == '|' && peek_char == '|') ||
 
                 // CASE 5
                 // "...(|...)..."
                 // emit `Empty` AFTER ( and BEFORE |
-                (prev == '(' && peek == '|') ||
+                (previous_car == '(' && peek_char == '|') ||
 
                 // CASE 6
                 // "...(...|)..."
                 // emit `Empty` AFTER | and BEFORE )
-                (prev == '|' && peek == ')') ||
+                (previous_car == '|' && peek_char == ')') ||
 
                 // CASE 7
                 // "...()..."
                 // emit `Empty` AFTER ( and BEFORE )
-                (prev == '(' && peek == ')')
+                (previous_car == '(' && peek_char == ')')
             ) {
                 // Note that we do not call advance()
                 // because Empty contains no characters at all
@@ -208,7 +214,7 @@ impl Iterator for Scanner {
         // By default assume the current character is an ordinary character
         // (not a metacharacter and not an escaped metacharacter)
         let mut next = Some(Token {
-            type_name: Character { value: peek },
+            type_name: Character { value: peek_char },
             position: self.current,
         });
 
@@ -217,7 +223,7 @@ impl Iterator for Scanner {
         // is not an ordinary character (metacharacter or an escaped metacharacter)
         let next_token = next.as_mut().unwrap(); //&mut Token
 
-        match peek {
+        match peek_char {
             '(' => {
                 next_token.type_name = LeftParen;
             }
@@ -239,27 +245,18 @@ impl Iterator for Scanner {
             '.' => {
                 next_token.type_name = Dot;
             }
-            '\\' => {
-                if (self.current + 1) >= self.source.len() {
-                    report_fatal_error("Unary operator slash \\ with no operand at end\n");
+            '\\' if is_anchor_char(next_char) => {
+                self.current += 2;
+                if next_char == 'A' {
+                    next_token.type_name = StartAnchor;
+                } else if next_char == 'Z' {
+                    next_token.type_name = EndAnchor;
+                } else if next_char == 'b' {
+                    next_token.type_name = WordBoundary;
+                } else {
+                    next_token.type_name = NonWordBoundary;
                 }
-
-                if let next_char @ ('\\' | '(' | ')' | '|' | '?' | '*' | '+' | '.') =
-                    self.next_char()
-                {
-                    // Next character is a metacharacter
-
-                    // Advanced one more time before the final advance at the end of function `next`
-                    // to consume the metacharacter following the \ in `peek`
-
-                    // Advance to consume the following (escaped by slash in `peek`) metacharacter
-                    self.advance();
-
-                    if let Character { value } = &mut next_token.type_name {
-                        // Token data is the escaped metacharacter, not the slash in `peek`
-                        *value = next_char;
-                    }
-                }
+                return next;
             }
             _ => {
                 // Any other ordinary character.
